@@ -383,45 +383,95 @@ async def edit_bullet(request: EditBulletRequest):
 
 @app.post("/api/export/pdf")
 async def export_pdf(latex_content: str = Form(...)):
-    """Export resume as PDF using pdflatex."""
-    try:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            tex_path = Path(tmpdir) / "resume.tex"
-            pdf_path = Path(tmpdir) / "resume.pdf"
+    """Export resume as PDF using pdflatex or online compiler fallback."""
+    import shutil
 
-            # Write LaTeX file
-            tex_path.write_text(latex_content)
+    # Check if pdflatex is available
+    pdflatex_available = shutil.which("pdflatex") is not None
 
-            # Compile with pdflatex
-            result = subprocess.run(
-                ["pdflatex", "-interaction=nonstopmode", "-output-directory", tmpdir, str(tex_path)],
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
+    if pdflatex_available:
+        # Use local pdflatex
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                tex_path = Path(tmpdir) / "resume.tex"
+                pdf_path = Path(tmpdir) / "resume.pdf"
 
-            if pdf_path.exists():
-                # Read PDF and return
-                pdf_content = pdf_path.read_bytes()
-                return FileResponse(
-                    pdf_path,
-                    media_type="application/pdf",
-                    filename="tailored_resume.pdf"
-                )
-            else:
-                # Return error with log
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"LaTeX compilation failed: {result.stderr[:500]}"
+                tex_path.write_text(latex_content)
+
+                result = subprocess.run(
+                    ["pdflatex", "-interaction=nonstopmode", "-output-directory", tmpdir, str(tex_path)],
+                    capture_output=True,
+                    text=True,
+                    timeout=30
                 )
 
-    except subprocess.TimeoutExpired:
-        raise HTTPException(status_code=500, detail="LaTeX compilation timed out")
-    except FileNotFoundError:
-        raise HTTPException(status_code=500, detail="pdflatex not found. Install TeX Live.")
-    except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+                if pdf_path.exists():
+                    return FileResponse(
+                        pdf_path,
+                        media_type="application/pdf",
+                        filename="tailored_resume.pdf"
+                    )
+                else:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"LaTeX compilation failed: {result.stderr[:500]}"
+                    )
+
+        except subprocess.TimeoutExpired:
+            raise HTTPException(status_code=500, detail="LaTeX compilation timed out")
+        except Exception as e:
+            traceback.print_exc()
+            raise HTTPException(status_code=500, detail=str(e))
+    else:
+        # Use online LaTeX compiler (latex.ytotech.com)
+        try:
+            import httpx
+
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                # Use latex.ytotech.com API
+                response = await client.post(
+                    "https://latex.ytotech.com/builds/sync",
+                    json={
+                        "compiler": "pdflatex",
+                        "resources": [
+                            {
+                                "main": True,
+                                "content": latex_content
+                            }
+                        ]
+                    }
+                )
+
+                if response.status_code == 200:
+                    from fastapi.responses import Response
+                    return Response(
+                        content=response.content,
+                        media_type="application/pdf",
+                        headers={"Content-Disposition": "attachment; filename=tailored_resume.pdf"}
+                    )
+                else:
+                    error_msg = response.text[:500] if response.text else "Unknown error"
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Online LaTeX compilation failed: {error_msg}"
+                    )
+
+        except httpx.TimeoutException:
+            raise HTTPException(status_code=500, detail="Online LaTeX compilation timed out")
+        except Exception as e:
+            traceback.print_exc()
+            raise HTTPException(status_code=500, detail=f"PDF compilation failed: {str(e)}")
+
+
+@app.post("/api/export/tex")
+async def export_tex(latex_content: str = Form(...)):
+    """Export resume as .tex file for manual compilation."""
+    from fastapi.responses import Response
+    return Response(
+        content=latex_content,
+        media_type="application/x-tex",
+        headers={"Content-Disposition": "attachment; filename=tailored_resume.tex"}
+    )
 
 
 @app.post("/api/export/txt")

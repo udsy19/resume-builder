@@ -502,7 +502,10 @@ The previous version violated one or more rules. You MUST fix these issues:
 • Count EVERY word in EVERY bullet - must be EXACTLY 28-32 words
 • Wrap ALL numbers, percentages, dollar amounts in \\textbf{{}}
 • Check verb usage - NO action verb can appear more than TWICE total
-• Naturally incorporate any missing keywords
+• Naturally incorporate any missing keywords into EXPERIENCE and PROJECTS only
+• DO NOT modify EDUCATION or CERTIFICATIONS sections
+• DO NOT bloat SKILLS section - only add overflow keywords
+• MUST fit on ONE page - remove skills if needed to fit
 
 Before submitting, VERIFY each bullet by counting words one by one.
 """ if is_refinement else ""
@@ -572,21 +575,35 @@ RULE 3: QUANTIFICATION (EVERY BULLET MUST HAVE METRICS)
   - Scale: \\textbf{{10,000+}} users, \\textbf{{50+}} endpoints
 • If original bullet lacks metrics, ADD realistic ones based on context
 
-RULE 4: KEYWORD INTEGRATION (ATS OPTIMIZATION)
+RULE 4: KEYWORD INTEGRATION (ATS OPTIMIZATION - STRICT PRIORITY ORDER)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-• Include ALL keywords from the KEYWORDS section above
+PRIORITY 1: Integrate keywords into EXPERIENCE section bullets (primary)
+PRIORITY 2: Integrate keywords into PROJECTS section bullets (secondary)
+PRIORITY 3: ONLY add remaining keywords to SKILLS section if they could NOT fit naturally in experience/projects
+
 • Use EXACT phrases from job description where possible
 • Integrate naturally - don't force awkward keyword stuffing
 • Technical terms should match job posting exactly
-• Include BOTH acronyms AND full forms when space allows
+• DO NOT bloat the skills section with every keyword - most should be in bullets
 
-RULE 5: STRUCTURE CONSTRAINTS
+RULE 5: PROTECTED SECTIONS (DO NOT MODIFY)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+• ⛔ EDUCATION section: Copy EXACTLY as-is, NO changes whatsoever
+• ⛔ CERTIFICATIONS section: Copy EXACTLY as-is, NO changes whatsoever
+• ⛔ Contact/Header info: Copy EXACTLY as-is, NO changes
+• ✅ EXPERIENCE section: MODIFY bullets to incorporate keywords
+• ✅ PROJECTS section: MODIFY bullets to incorporate keywords
+• ✅ SKILLS section: May add ONLY overflow keywords that couldn't fit elsewhere
+
+RULE 6: STRUCTURE CONSTRAINTS
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 • Maximum {max_experiences} work experiences
 • Maximum {max_bullets} bullets per experience
-• MUST fit on ONE page
+• ⚠️ MUST fit on ONE page - this is NON-NEGOTIABLE
+• DO NOT add excessive skills that would push content to page 2
 • Preserve the original LaTeX structure and formatting
 • Keep all \\resumeSubheading formatting intact
+• If adding a skill would cause page overflow, DO NOT add it
 
 ══════════════════════════════════════════════════════════════════════════════
                               EXAMPLE BULLETS
@@ -618,11 +635,17 @@ RULE 5: STRUCTURE CONSTRAINTS
 ══════════════════════════════════════════════════════════════════════════════
 
 Generate the complete tailored LaTeX resume following ALL rules above.
-• Preserve the exact LaTeX document structure
-• Transform each bullet to match the target job
-• Verify EVERY bullet is 28-32 words by counting
-• Ensure EVERY number is wrapped in \\textbf{{}}
-• Track verb usage - no verb more than twice
+
+CHECKLIST BEFORE SUBMITTING:
+☐ EDUCATION section is UNCHANGED from original
+☐ CERTIFICATIONS section is UNCHANGED from original
+☐ Keywords integrated into EXPERIENCE bullets (priority 1)
+☐ Keywords integrated into PROJECTS bullets (priority 2)
+☐ Skills section has ONLY overflow keywords (not bloated)
+☐ Resume fits on ONE PAGE (critical!)
+☐ Every bullet is 28-32 words (counted)
+☐ Every number wrapped in \\textbf{{}}
+☐ No verb used more than twice
 
 Return ONLY the complete LaTeX document, no explanations or markdown."""
 

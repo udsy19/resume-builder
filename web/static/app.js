@@ -745,7 +745,7 @@ async function exportPDF() {
         return;
     }
 
-    showLoading(true, 'Generating PDF...', 0);
+    showLoading(true, 'Generating PDF (this may take a moment)...', 0);
 
     try {
         const formData = new FormData();
@@ -772,7 +772,15 @@ async function exportPDF() {
         URL.revokeObjectURL(url);
 
     } catch (error) {
-        showError(error.message);
+        // Offer .tex download as fallback
+        const shouldDownloadTex = confirm(
+            `PDF generation failed: ${error.message}\n\n` +
+            `Would you like to download the .tex file instead?\n` +
+            `You can compile it using Overleaf.com or a local LaTeX installation.`
+        );
+        if (shouldDownloadTex) {
+            downloadFile('tailored_resume.tex', latex);
+        }
     } finally {
         showLoading(false);
     }
