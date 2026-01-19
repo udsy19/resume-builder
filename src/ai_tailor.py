@@ -209,6 +209,128 @@ class LaTeXValidator:
         return sections
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+#                          PAGE COUNT VERIFICATION
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class PageCounter:
+    """Check if LaTeX compiles to exactly one page."""
+
+    @staticmethod
+    async def check_page_count(latex_content: str) -> Tuple[int, bool, str]:
+        """
+        Compile LaTeX and check page count.
+        Returns: (page_count, success, error_message)
+        """
+        import tempfile
+        import subprocess
+        import shutil
+        from pathlib import Path
+
+        # Check if pdflatex is available locally
+        pdflatex_available = shutil.which("pdflatex") is not None
+
+        if pdflatex_available:
+            try:
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    tex_path = Path(tmpdir) / "resume.tex"
+                    tex_path.write_text(latex_content)
+
+                    result = subprocess.run(
+                        ["pdflatex", "-interaction=nonstopmode", "-output-directory", tmpdir, str(tex_path)],
+                        capture_output=True,
+                        text=True,
+                        timeout=30
+                    )
+
+                    log_path = Path(tmpdir) / "resume.log"
+                    pdf_path = Path(tmpdir) / "resume.pdf"
+
+                    if pdf_path.exists() and log_path.exists():
+                        log_content = log_path.read_text()
+                        # Look for page count in log
+                        page_match = re.search(r'Output written on .+ \((\d+) page', log_content)
+                        if page_match:
+                            pages = int(page_match.group(1))
+                            return pages, True, ""
+                        return 1, True, ""  # Assume 1 if can't parse
+                    else:
+                        return 0, False, result.stderr[:200]
+
+            except subprocess.TimeoutExpired:
+                return 0, False, "Compilation timeout"
+            except Exception as e:
+                return 0, False, str(e)
+        else:
+            # Use online compiler for page check
+            try:
+                import httpx
+
+                async with httpx.AsyncClient(timeout=60.0) as client:
+                    response = await client.post(
+                        "https://latex.ytotech.com/builds/sync",
+                        json={
+                            "compiler": "pdflatex",
+                            "resources": [{"main": True, "content": latex_content}]
+                        }
+                    )
+
+                    if response.status_code == 200:
+                        # PDF compiled successfully - estimate pages from size
+                        # Rough heuristic: single page resume PDF is typically 30-80KB
+                        pdf_size = len(response.content)
+                        estimated_pages = max(1, pdf_size // 60000)  # ~60KB per page estimate
+                        return estimated_pages, True, ""
+                    else:
+                        return 0, False, response.text[:200]
+
+            except Exception as e:
+                return 0, False, str(e)
+
+    @staticmethod
+    def estimate_page_count_heuristic(latex_content: str) -> int:
+        """
+        Estimate page count without compilation (fast heuristic).
+        Based on content analysis.
+        """
+        # Count resume items
+        bullet_count = len(re.findall(r'\\resumeItem\{', latex_content))
+
+        # Count experiences
+        experience_count = len(re.findall(r'\\resumeSubheading\{', latex_content))
+
+        # Count sections
+        section_count = len(re.findall(r'\\section\{', latex_content))
+
+        # Estimate based on typical resume layouts
+        # Typical 1-page resume: 3-4 experiences, 12-16 bullets, 4-5 sections
+        content_score = (
+            bullet_count * 2.5 +  # Each bullet ~2.5% of page
+            experience_count * 5 +  # Each experience header ~5%
+            section_count * 3  # Each section header ~3%
+        )
+
+        # Also consider raw content length
+        # Typical 1-page resume LaTeX is ~3000-5000 chars of content
+        doc_start = latex_content.find(r'\begin{document}')
+        doc_end = latex_content.find(r'\end{document}')
+        if doc_start != -1 and doc_end != -1:
+            content_length = doc_end - doc_start
+            length_score = content_length / 4000 * 100  # 4000 chars = 100%
+        else:
+            length_score = 0
+
+        # Combine scores
+        total_score = max(content_score, length_score)
+
+        if total_score <= 100:
+            return 1
+        elif total_score <= 200:
+            return 2
+        else:
+            return 3
+
+
 @dataclass
 class BulletAnalysis:
     """Analysis of a single bullet point."""
@@ -217,7 +339,7 @@ class BulletAnalysis:
     action_verb: str
     has_quantification: bool
     quantifications: List[str]
-    is_valid_length: bool  # 28-32 words
+    is_valid_length: bool  # 24-28 words
     keywords_found: List[str]
 
 
@@ -299,7 +421,7 @@ class ResumeValidator:
         # Generate suggestions
         suggestions = []
         if bullets_wrong_length > 0:
-            suggestions.append(f"{bullets_wrong_length} bullets are not 28-32 words")
+            suggestions.append(f"{bullets_wrong_length} bullets are not 24-28 words")
         if bullets_no_quant > 0:
             suggestions.append(f"{bullets_no_quant} bullets lack quantification")
         if repeated_verbs:
@@ -362,7 +484,7 @@ class ResumeValidator:
             action_verb=words[0] if words else "",
             has_quantification=len(quants) > 0,
             quantifications=quants,
-            is_valid_length=28 <= word_count <= 32,
+            is_valid_length=24 <= word_count <= 28,
             keywords_found=keywords_found
         )
 
@@ -494,13 +616,50 @@ class AIResumeTailorAsync:
                 tailored = await self._fix_violations(tailored, validation, job_analysis)
 
         # Step 3: Post-generation verification pass
-        yield {"step": "verifying", "message": "Running verification pass...", "progress": 78}
+        yield {"step": "verifying", "message": "Running verification pass...", "progress": 75}
         tailored = await self._verify_and_fix_output(tailored, validator)
 
-        # Step 4: Final validation
+        # Step 4: Enforce one-page limit (recursive)
+        yield {"step": "checking_pages", "message": "Checking page count...", "progress": 78}
+
+        # Quick heuristic check first
+        estimated_pages = PageCounter.estimate_page_count_heuristic(tailored)
+
+        if estimated_pages > 1:
+            yield {
+                "step": "reducing",
+                "message": f"Resume exceeds 1 page (estimated {estimated_pages}). Reducing content...",
+                "progress": 80
+            }
+
+            tailored, final_pages, success = await self._enforce_one_page(tailored, max_attempts=3)
+
+            if success:
+                yield {
+                    "step": "page_fixed",
+                    "message": "Resume reduced to 1 page!",
+                    "progress": 83,
+                    "data": {"pages": final_pages}
+                }
+            else:
+                yield {
+                    "step": "page_warning",
+                    "message": f"Warning: Resume may still be {final_pages} pages. Manual reduction may be needed.",
+                    "progress": 83,
+                    "data": {"pages": final_pages}
+                }
+        else:
+            yield {
+                "step": "page_ok",
+                "message": "Resume fits on 1 page!",
+                "progress": 83,
+                "data": {"pages": 1}
+            }
+
+        # Step 5: Final validation
         validation = validator.validate(tailored)
 
-        # Step 5: Generate suggestions
+        # Step 6: Generate suggestions
         yield {"step": "suggestions", "message": "Generating improvement suggestions...", "progress": 85}
         bullet_suggestions = await self._generate_bullet_suggestions(
             tailored, validation.missing_keywords, job_analysis
@@ -760,7 +919,7 @@ Return ONLY the JSON object, no additional text."""
 ══════════════════════════════════════════════════════════════════════════════
 
 The previous version violated one or more rules. You MUST fix these issues:
-• Count EVERY word in EVERY bullet - must be EXACTLY 28-32 words
+• Count EVERY word in EVERY bullet - must be EXACTLY 24-28 words
 • Wrap ALL numbers, percentages, dollar amounts in \\textbf{{}}
 • Check verb usage - NO action verb can appear more than TWICE total
 • Naturally incorporate any missing keywords into EXPERIENCE and PROJECTS only
@@ -799,7 +958,7 @@ Before submitting, VERIFY each bullet by counting words one by one.
 
 RULE 1: BULLET POINT LENGTH (CRITICAL - COUNT EVERY WORD)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-• Each \\resumeItem MUST contain EXACTLY 28-32 words
+• Each \\resumeItem MUST contain EXACTLY 24-28 words
 • Count contractions as ONE word (don't = 1 word)
 • Count hyphenated terms as ONE word (cloud-native = 1 word)
 • Numbers count as words (\\textbf{{40\\%}} = 1 word)
@@ -870,20 +1029,20 @@ RULE 6: STRUCTURE CONSTRAINTS
                               EXAMPLE BULLETS
 ══════════════════════════════════════════════════════════════════════════════
 
-✅ CORRECT (30 words, starts with action verb, has \\textbf{{}} metrics):
-\\resumeItem{{Architected and deployed \\textbf{{5}} cloud-native endpoint detection and response solutions across \\textbf{{3}} AWS environments, reducing mean time to detection by \\textbf{{40\\%}} through automated threat correlation and real-time security monitoring dashboards.}}
+✅ CORRECT (26 words, starts with action verb, has \\textbf{{}} metrics):
+\\resumeItem{{Architected and deployed \\textbf{{5}} cloud-native endpoint detection solutions across \\textbf{{3}} AWS environments, reducing mean time to detection by \\textbf{{40\\%}} through automated threat correlation.}}
 
-✅ CORRECT (29 words):
-\\resumeItem{{Spearheaded implementation of zero-trust security framework protecting \\textbf{{10,000+}} endpoints across global infrastructure, achieving \\textbf{{99.9\\%}} uptime while reducing unauthorized access attempts by \\textbf{{75\\%}} through continuous multi-factor authentication protocols.}}
+✅ CORRECT (25 words):
+\\resumeItem{{Spearheaded implementation of zero-trust security framework protecting \\textbf{{10,000+}} endpoints, achieving \\textbf{{99.9\\%}} uptime while reducing unauthorized access attempts by \\textbf{{75\\%}} through continuous authentication.}}
 
-✅ CORRECT (31 words):
-\\resumeItem{{Led cross-functional team of \\textbf{{8}} engineers to successfully migrate legacy infrastructure to Kubernetes orchestration platform, decreasing deployment time from \\textbf{{4}} hours to \\textbf{{15}} minutes while improving overall system reliability by \\textbf{{60\\%}}.}}
+✅ CORRECT (27 words):
+\\resumeItem{{Led cross-functional team of \\textbf{{8}} engineers to migrate legacy infrastructure to Kubernetes, decreasing deployment time from \\textbf{{4}} hours to \\textbf{{15}} minutes while improving reliability by \\textbf{{60\\%}}.}}
 
 ❌ WRONG (only 18 words - TOO SHORT):
 \\resumeItem{{Implemented security controls across cloud environments, reducing incidents by 40\\% through automated detection.}}
 
-❌ WRONG (40 words - TOO LONG):
-\\resumeItem{{Designed and implemented a comprehensive security monitoring solution that integrated with multiple cloud platforms including AWS and GCP to provide real-time threat detection and automated incident response capabilities for the entire organization while ensuring compliance with industry regulations.}}
+❌ WRONG (35 words - TOO LONG):
+\\resumeItem{{Designed and implemented a comprehensive security monitoring solution that integrated with multiple cloud platforms including AWS and GCP to provide real-time threat detection and automated incident response capabilities for the entire organization.}}
 
 ❌ WRONG (no \\textbf{{}} around numbers):
 \\resumeItem{{Deployed 5 endpoint detection controls across 3 environments, reducing security incidents by 40 percent.}}
@@ -911,7 +1070,7 @@ STEP 3: WRITE EACH BULLET WITH VERIFICATION
 For each bullet, do this:
 a) Write the bullet
 b) Count the words: "Word 1, Word 2, Word 3..." until you reach the end
-c) Verify count is 28-32. If not, adjust and recount.
+c) Verify count is 24-28. If not, adjust and recount.
 d) Verify it has \\textbf{{number}}. If not, add one.
 e) Check verb hasn't been used >2x. If so, replace.
 
@@ -920,7 +1079,7 @@ Before outputting, verify:
 ☐ EDUCATION section is UNCHANGED from original
 ☐ CERTIFICATIONS section is UNCHANGED from original
 ☐ Header/contact info is UNCHANGED
-☐ Every bullet is 28-32 words (you counted each one)
+☐ Every bullet is 24-28 words (you counted each one)
 ☐ Every number is wrapped in \\textbf{{}}
 ☐ No action verb appears more than 2 times total
 ☐ Keywords are in EXPERIENCE/PROJECTS, not bloating skills
@@ -964,6 +1123,89 @@ Return ONLY the complete LaTeX document, no explanations or markdown."""
         output = re.sub(r'```latex\n?|```\n?', '', output)
         return output.strip()
 
+    async def _enforce_one_page(
+        self,
+        latex: str,
+        max_attempts: int = 3
+    ) -> Tuple[str, int, bool]:
+        """
+        Recursively reduce content until resume fits on one page.
+        Returns: (latex, page_count, success)
+        """
+        current_latex = latex
+
+        for attempt in range(max_attempts):
+            # First try fast heuristic estimate
+            estimated_pages = PageCounter.estimate_page_count_heuristic(current_latex)
+
+            if estimated_pages == 1:
+                # Heuristic says 1 page - verify with actual compilation if possible
+                page_count, success, _ = await PageCounter.check_page_count(current_latex)
+                if success and page_count == 1:
+                    return current_latex, 1, True
+                elif success and page_count > 1:
+                    # Need to reduce more
+                    pass
+                else:
+                    # Compilation failed, trust heuristic
+                    return current_latex, 1, True
+
+            # Need to reduce content
+            current_latex = await self._reduce_content_for_one_page(current_latex, attempt + 1)
+
+        # Final check
+        page_count, success, _ = await PageCounter.check_page_count(current_latex)
+        if not success:
+            page_count = PageCounter.estimate_page_count_heuristic(current_latex)
+
+        return current_latex, page_count, page_count == 1
+
+    async def _reduce_content_for_one_page(self, latex: str, attempt: int) -> str:
+        """
+        Reduce content to fit on one page using AI.
+        Strategy depends on attempt number.
+        """
+        strategies = {
+            1: "Remove the least important skills from the skills section. Keep only the top 10-12 most relevant skills.",
+            2: "Reduce each bullet point to exactly 24 words (minimum of range). Remove any project if there are more than 2.",
+            3: "Remove the oldest/least relevant experience entirely. Keep only 3 experiences with 3 bullets each."
+        }
+
+        strategy = strategies.get(attempt, strategies[3])
+
+        prompt = f"""The resume below is TOO LONG and exceeds 1 page. You MUST reduce its content.
+
+CURRENT RESUME:
+{latex}
+
+REDUCTION STRATEGY (Attempt {attempt}):
+{strategy}
+
+STRICT RULES:
+• DO NOT modify EDUCATION section
+• DO NOT modify CERTIFICATIONS section
+• Keep all \\textbf{{}} formatting
+• Each bullet must still be 24-28 words
+• Resume MUST fit on ONE page after this reduction
+
+Apply the reduction strategy and return the complete LaTeX document.
+Return ONLY the LaTeX, no explanations."""
+
+        async def make_request():
+            return await self.client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=8000,
+                messages=[{"role": "user", "content": prompt}]
+            )
+
+        try:
+            response = await retry_with_backoff(make_request, max_retries=2)
+            output = response.content[0].text
+            output = re.sub(r'```latex\n?|```\n?', '', output)
+            return output.strip()
+        except Exception:
+            return latex  # Return original if reduction fails
+
     async def _verify_and_fix_output(self, latex: str, validator: ResumeValidator) -> str:
         """Post-generation verification pass to catch any remaining issues."""
         validation = validator.validate(latex)
@@ -980,7 +1222,7 @@ Return ONLY the complete LaTeX document, no explanations or markdown."""
         issues = []
         for b in validation.bullet_analyses:
             if not b.is_valid_length:
-                issues.append(f"Bullet has {b.word_count} words (need 28-32): \"{b.text[:50]}...\"")
+                issues.append(f"Bullet has {b.word_count} words (need 24-28): \"{b.text[:50]}...\"")
 
         if not issues:
             return latex
@@ -994,7 +1236,7 @@ RESUME:
 {latex}
 
 Rules:
-• Adjust each flagged bullet to EXACTLY 28-32 words
+• Adjust each flagged bullet to EXACTLY 24-28 words
 • Keep all other bullets unchanged
 • Keep all \\textbf{{}} formatting
 • Keep Education/Certifications unchanged
@@ -1025,10 +1267,10 @@ Return ONLY the fixed LaTeX."""
         quant_issues = []
         for b in validation.bullet_analyses:
             if not b.is_valid_length:
-                direction = "ADD" if b.word_count < 28 else "REMOVE"
-                diff = abs(30 - b.word_count)  # Target middle of range
+                direction = "ADD" if b.word_count < 24 else "REMOVE"
+                diff = abs(26 - b.word_count)  # Target middle of range
                 length_issues.append(
-                    f"  • [{b.word_count} words, need 28-32, {direction} ~{diff} words]\n"
+                    f"  • [{b.word_count} words, need 24-28, {direction} ~{diff} words]\n"
                     f"    Current: \"{b.text[:80]}{'...' if len(b.text) > 80 else ''}\""
                 )
             if not b.has_quantification:
@@ -1048,7 +1290,7 @@ Return ONLY the fixed LaTeX."""
 FIX STRATEGY:
 • If too SHORT: Add context, specifics, or additional impact metrics
 • If too LONG: Remove filler words, combine phrases, use concise terms
-• TARGET: Aim for 30 words (middle of 28-32 range)
+• TARGET: Aim for 26 words (middle of 24-28 range)
 """
 
         if quant_issues:
@@ -1108,7 +1350,7 @@ FIX STRATEGY:
 
 1. For EACH bullet with wrong word count:
    • Count the current words
-   • Adjust to be EXACTLY 28-32 words
+   • Adjust to be EXACTLY 24-28 words
    • Verify by recounting before including
 
 2. For EACH bullet missing quantification:
@@ -1174,7 +1416,7 @@ REQUIREMENTS FOR EACH SUGGESTION:
 2. Show the CURRENT bullet text
 3. Provide a REWRITTEN bullet that:
    • Includes the missing keyword naturally
-   • Is EXACTLY 28-32 words (count carefully!)
+   • Is EXACTLY 24-28 words (count carefully!)
    • Maintains \\textbf{{}} around all metrics
    • Starts with a strong action verb
    • Preserves the original meaning/achievement
@@ -1188,16 +1430,16 @@ Return a JSON array with this EXACT structure:
     {{
         "keyword": "the missing keyword",
         "current_bullet": "the existing bullet text that can be modified",
-        "suggested_bullet": "the rewritten bullet WITH the keyword (28-32 words, with \\\\textbf{{}} metrics)",
+        "suggested_bullet": "the rewritten bullet WITH the keyword (24-28 words, with \\\\textbf{{}} metrics)",
         "location": "which experience/section contains this bullet",
-        "word_count": 30,
+        "word_count": 26,
         "explanation": "brief note on how the keyword was integrated"
     }}
 ]
 
 IMPORTANT:
 • Provide suggestions for up to 10 keywords
-• Each suggested_bullet MUST be 28-32 words - COUNT THEM
+• Each suggested_bullet MUST be 24-28 words - COUNT THEM
 • Keep \\textbf{{}} formatting for all numbers
 • Make the keyword integration sound natural, not forced
 • If a keyword genuinely cannot fit, note that in explanation
