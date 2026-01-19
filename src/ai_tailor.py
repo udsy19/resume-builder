@@ -19,7 +19,7 @@ class BulletAnalysis:
     action_verb: str
     has_quantification: bool
     quantifications: List[str]
-    is_valid_length: bool  # 24-28 words
+    is_valid_length: bool  # 28-32 words
     keywords_found: List[str]
 
 
@@ -100,7 +100,7 @@ class ResumeValidator:
         # Generate suggestions
         suggestions = []
         if bullets_wrong_length > 0:
-            suggestions.append(f"{bullets_wrong_length} bullets are not 24-28 words")
+            suggestions.append(f"{bullets_wrong_length} bullets are not 28-32 words")
         if bullets_no_quant > 0:
             suggestions.append(f"{bullets_no_quant} bullets lack quantification")
         if repeated_verbs:
@@ -164,7 +164,7 @@ class ResumeValidator:
             action_verb=words[0] if words else "",
             has_quantification=len(quants) > 0,
             quantifications=quants,
-            is_valid_length=24 <= word_count <= 28,
+            is_valid_length=28 <= word_count <= 32,
             keywords_found=keywords_found
         )
 
@@ -499,7 +499,7 @@ Return ONLY the JSON object, no additional text."""
 ══════════════════════════════════════════════════════════════════════════════
 
 The previous version violated one or more rules. You MUST fix these issues:
-• Count EVERY word in EVERY bullet - must be EXACTLY 24-28 words
+• Count EVERY word in EVERY bullet - must be EXACTLY 28-32 words
 • Wrap ALL numbers, percentages, dollar amounts in \\textbf{{}}
 • Check verb usage - NO action verb can appear more than TWICE total
 • Naturally incorporate any missing keywords
@@ -535,7 +535,7 @@ Before submitting, VERIFY each bullet by counting words one by one.
 
 RULE 1: BULLET POINT LENGTH (CRITICAL - COUNT EVERY WORD)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-• Each \\resumeItem MUST contain EXACTLY 24-28 words
+• Each \\resumeItem MUST contain EXACTLY 28-32 words
 • Count contractions as ONE word (don't = 1 word)
 • Count hyphenated terms as ONE word (cloud-native = 1 word)
 • Numbers count as words (\\textbf{{40\\%}} = 1 word)
@@ -592,20 +592,20 @@ RULE 5: STRUCTURE CONSTRAINTS
                               EXAMPLE BULLETS
 ══════════════════════════════════════════════════════════════════════════════
 
-✅ CORRECT (26 words, starts with action verb, has \\textbf{{}} metrics):
-\\resumeItem{{Architected and deployed \\textbf{{5}} cloud-native endpoint detection and response solutions across \\textbf{{3}} AWS environments, reducing mean time to detection by \\textbf{{40\\%}} through automated threat correlation.}}
+✅ CORRECT (30 words, starts with action verb, has \\textbf{{}} metrics):
+\\resumeItem{{Architected and deployed \\textbf{{5}} cloud-native endpoint detection and response solutions across \\textbf{{3}} AWS environments, reducing mean time to detection by \\textbf{{40\\%}} through automated threat correlation and real-time security monitoring dashboards.}}
 
-✅ CORRECT (25 words):
-\\resumeItem{{Spearheaded implementation of zero-trust security framework protecting \\textbf{{10,000+}} endpoints, achieving \\textbf{{99.9\\%}} uptime while reducing unauthorized access attempts by \\textbf{{75\\%}} through continuous authentication.}}
+✅ CORRECT (29 words):
+\\resumeItem{{Spearheaded implementation of zero-trust security framework protecting \\textbf{{10,000+}} endpoints across global infrastructure, achieving \\textbf{{99.9\\%}} uptime while reducing unauthorized access attempts by \\textbf{{75\\%}} through continuous multi-factor authentication protocols.}}
 
-✅ CORRECT (27 words):
-\\resumeItem{{Led cross-functional team of \\textbf{{8}} engineers to migrate legacy infrastructure to Kubernetes, decreasing deployment time from \\textbf{{4}} hours to \\textbf{{15}} minutes while improving system reliability by \\textbf{{60\\%}}.}}
+✅ CORRECT (31 words):
+\\resumeItem{{Led cross-functional team of \\textbf{{8}} engineers to successfully migrate legacy infrastructure to Kubernetes orchestration platform, decreasing deployment time from \\textbf{{4}} hours to \\textbf{{15}} minutes while improving overall system reliability by \\textbf{{60\\%}}.}}
 
 ❌ WRONG (only 18 words - TOO SHORT):
 \\resumeItem{{Implemented security controls across cloud environments, reducing incidents by 40\\% through automated detection.}}
 
-❌ WRONG (35 words - TOO LONG):
-\\resumeItem{{Designed and implemented a comprehensive security monitoring solution that integrated with multiple cloud platforms including AWS and GCP to provide real-time threat detection and automated incident response capabilities for the entire organization.}}
+❌ WRONG (40 words - TOO LONG):
+\\resumeItem{{Designed and implemented a comprehensive security monitoring solution that integrated with multiple cloud platforms including AWS and GCP to provide real-time threat detection and automated incident response capabilities for the entire organization while ensuring compliance with industry regulations.}}
 
 ❌ WRONG (no \\textbf{{}} around numbers):
 \\resumeItem{{Deployed 5 endpoint detection controls across 3 environments, reducing security incidents by 40 percent.}}
@@ -620,7 +620,7 @@ RULE 5: STRUCTURE CONSTRAINTS
 Generate the complete tailored LaTeX resume following ALL rules above.
 • Preserve the exact LaTeX document structure
 • Transform each bullet to match the target job
-• Verify EVERY bullet is 24-28 words by counting
+• Verify EVERY bullet is 28-32 words by counting
 • Ensure EVERY number is wrapped in \\textbf{{}}
 • Track verb usage - no verb more than twice
 
@@ -644,10 +644,10 @@ Return ONLY the complete LaTeX document, no explanations or markdown."""
         quant_issues = []
         for b in validation.bullet_analyses:
             if not b.is_valid_length:
-                direction = "ADD" if b.word_count < 24 else "REMOVE"
-                diff = abs(26 - b.word_count)  # Target middle of range
+                direction = "ADD" if b.word_count < 28 else "REMOVE"
+                diff = abs(30 - b.word_count)  # Target middle of range
                 length_issues.append(
-                    f"  • [{b.word_count} words, need 24-28, {direction} ~{diff} words]\n"
+                    f"  • [{b.word_count} words, need 28-32, {direction} ~{diff} words]\n"
                     f"    Current: \"{b.text[:80]}{'...' if len(b.text) > 80 else ''}\""
                 )
             if not b.has_quantification:
@@ -667,7 +667,7 @@ Return ONLY the complete LaTeX document, no explanations or markdown."""
 FIX STRATEGY:
 • If too SHORT: Add context, specifics, or additional impact metrics
 • If too LONG: Remove filler words, combine phrases, use concise terms
-• TARGET: Aim for 26 words (middle of 24-28 range)
+• TARGET: Aim for 30 words (middle of 28-32 range)
 """
 
         if quant_issues:
@@ -727,7 +727,7 @@ FIX STRATEGY:
 
 1. For EACH bullet with wrong word count:
    • Count the current words
-   • Adjust to be EXACTLY 24-28 words
+   • Adjust to be EXACTLY 28-32 words
    • Verify by recounting before including
 
 2. For EACH bullet missing quantification:
@@ -793,7 +793,7 @@ REQUIREMENTS FOR EACH SUGGESTION:
 2. Show the CURRENT bullet text
 3. Provide a REWRITTEN bullet that:
    • Includes the missing keyword naturally
-   • Is EXACTLY 24-28 words (count carefully!)
+   • Is EXACTLY 28-32 words (count carefully!)
    • Maintains \\textbf{{}} around all metrics
    • Starts with a strong action verb
    • Preserves the original meaning/achievement
@@ -807,16 +807,16 @@ Return a JSON array with this EXACT structure:
     {{
         "keyword": "the missing keyword",
         "current_bullet": "the existing bullet text that can be modified",
-        "suggested_bullet": "the rewritten bullet WITH the keyword (24-28 words, with \\\\textbf{{}} metrics)",
+        "suggested_bullet": "the rewritten bullet WITH the keyword (28-32 words, with \\\\textbf{{}} metrics)",
         "location": "which experience/section contains this bullet",
-        "word_count": 26,
+        "word_count": 30,
         "explanation": "brief note on how the keyword was integrated"
     }}
 ]
 
 IMPORTANT:
 • Provide suggestions for up to 10 keywords
-• Each suggested_bullet MUST be 24-28 words - COUNT THEM
+• Each suggested_bullet MUST be 28-32 words - COUNT THEM
 • Keep \\textbf{{}} formatting for all numbers
 • Make the keyword integration sound natural, not forced
 • If a keyword genuinely cannot fit, note that in explanation
