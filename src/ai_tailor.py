@@ -1,14 +1,212 @@
 """
 AI-powered resume tailoring using LLM with multi-pass validation.
+Enhanced with robust error handling, retry logic, and smart keyword matching.
 """
 
 import os
 import re
 import json
 import asyncio
-from typing import Optional, Dict, List, AsyncGenerator, Callable
+import random
+from typing import Optional, Dict, List, AsyncGenerator, Callable, Tuple
 from dataclasses import dataclass, field
 from collections import Counter
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#                          KEYWORD MATCHING UTILITIES
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class KeywordMatcher:
+    """Smart keyword matching with stemming and synonym detection."""
+
+    # Common word endings to strip for stemming
+    SUFFIXES = ['ing', 'ed', 'er', 'tion', 'ment', 'ness', 'ity', 'ies', 's']
+
+    # Synonym groups for common tech terms
+    SYNONYMS = {
+        'javascript': ['js', 'javascript', 'ecmascript'],
+        'typescript': ['ts', 'typescript'],
+        'python': ['python', 'python3', 'py'],
+        'kubernetes': ['kubernetes', 'k8s', 'kube'],
+        'amazon web services': ['aws', 'amazon web services'],
+        'google cloud platform': ['gcp', 'google cloud', 'google cloud platform'],
+        'microsoft azure': ['azure', 'microsoft azure'],
+        'ci/cd': ['ci/cd', 'cicd', 'ci cd', 'continuous integration', 'continuous deployment'],
+        'machine learning': ['ml', 'machine learning'],
+        'artificial intelligence': ['ai', 'artificial intelligence'],
+        'devops': ['devops', 'dev ops', 'dev-ops'],
+        'api': ['api', 'apis', 'rest api', 'restful api'],
+        'sql': ['sql', 'mysql', 'postgresql', 'postgres'],
+        'nosql': ['nosql', 'mongodb', 'dynamodb', 'cassandra'],
+        'docker': ['docker', 'containerization', 'containers'],
+    }
+
+    @classmethod
+    def stem(cls, word: str) -> str:
+        """Simple stemming - remove common suffixes."""
+        word = word.lower().strip()
+        for suffix in cls.SUFFIXES:
+            if word.endswith(suffix) and len(word) > len(suffix) + 2:
+                return word[:-len(suffix)]
+        return word
+
+    @classmethod
+    def get_synonyms(cls, keyword: str) -> List[str]:
+        """Get all synonyms for a keyword."""
+        keyword_lower = keyword.lower()
+        for group in cls.SYNONYMS.values():
+            if keyword_lower in group:
+                return group
+        return [keyword_lower]
+
+    @classmethod
+    def matches(cls, keyword: str, text: str) -> bool:
+        """Check if keyword matches in text (with stemming and synonyms)."""
+        text_lower = text.lower()
+
+        # Direct match
+        if keyword.lower() in text_lower:
+            return True
+
+        # Synonym match
+        for synonym in cls.get_synonyms(keyword):
+            if synonym in text_lower:
+                return True
+
+        # Stemmed match (for single words)
+        if ' ' not in keyword:
+            keyword_stem = cls.stem(keyword)
+            words_in_text = text_lower.split()
+            for word in words_in_text:
+                if cls.stem(word) == keyword_stem:
+                    return True
+
+        return False
+
+    @classmethod
+    def count_matches(cls, keywords: List[str], text: str) -> Tuple[List[str], List[str]]:
+        """Return matched and unmatched keywords."""
+        matched = []
+        unmatched = []
+        for keyword in keywords:
+            if cls.matches(keyword, text):
+                matched.append(keyword)
+            else:
+                unmatched.append(keyword)
+        return matched, unmatched
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#                              RETRY UTILITIES
+# ═══════════════════════════════════════════════════════════════════════════════
+
+async def retry_with_backoff(
+    func,
+    max_retries: int = 3,
+    base_delay: float = 1.0,
+    max_delay: float = 30.0,
+    exceptions: tuple = (Exception,)
+):
+    """Retry a function with exponential backoff."""
+    last_exception = None
+
+    for attempt in range(max_retries):
+        try:
+            return await func()
+        except exceptions as e:
+            last_exception = e
+            if attempt < max_retries - 1:
+                delay = min(base_delay * (2 ** attempt) + random.uniform(0, 1), max_delay)
+                await asyncio.sleep(delay)
+
+    raise last_exception
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#                            LATEX VALIDATION
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class LaTeXValidator:
+    """Validate LaTeX content for common issues."""
+
+    @staticmethod
+    def validate(content: str) -> Tuple[bool, List[str]]:
+        """Validate LaTeX and return (is_valid, list of issues)."""
+        issues = []
+
+        if not content or not content.strip():
+            return False, ["Empty content"]
+
+        # Check for document structure
+        if r'\begin{document}' not in content:
+            issues.append("Missing \\begin{document}")
+        if r'\end{document}' not in content:
+            issues.append("Missing \\end{document}")
+
+        # Check for balanced braces
+        open_braces = content.count('{')
+        close_braces = content.count('}')
+        if open_braces != close_braces:
+            issues.append(f"Unbalanced braces: {open_braces} open, {close_braces} close")
+
+        # Check for common escape issues
+        if '\\%' not in content and '%' in content.replace('%%', ''):
+            # Might have unescaped percent signs
+            pass  # This is often fine in LaTeX comments
+
+        # Check for truncated content
+        if content.rstrip().endswith('...'):
+            issues.append("Content appears truncated")
+
+        # Check for minimum structure
+        if r'\resumeItem' not in content and r'\section' not in content:
+            issues.append("Missing resume structure elements")
+
+        return len(issues) == 0, issues
+
+    @staticmethod
+    def sanitize_input(content: str) -> str:
+        """Sanitize input LaTeX content."""
+        if not content:
+            return ""
+
+        # Remove null bytes
+        content = content.replace('\x00', '')
+
+        # Normalize line endings
+        content = content.replace('\r\n', '\n').replace('\r', '\n')
+
+        # Remove excessive whitespace while preserving structure
+        lines = content.split('\n')
+        cleaned_lines = []
+        for line in lines:
+            # Don't strip lines that are intentionally empty (for paragraph breaks)
+            if line.strip() or (cleaned_lines and cleaned_lines[-1].strip()):
+                cleaned_lines.append(line.rstrip())
+
+        return '\n'.join(cleaned_lines)
+
+    @staticmethod
+    def extract_sections(content: str) -> Dict[str, str]:
+        """Extract major sections from LaTeX resume."""
+        sections = {}
+
+        # Common section patterns
+        section_patterns = [
+            (r'education', r'\\section\{[Ee]ducation\}(.*?)(?=\\section|\\end\{document\})'),
+            (r'experience', r'\\section\{[Ee]xperience\}(.*?)(?=\\section|\\end\{document\})'),
+            (r'projects', r'\\section\{[Pp]rojects\}(.*?)(?=\\section|\\end\{document\})'),
+            (r'skills', r'\\section\{[Ss]kills\}(.*?)(?=\\section|\\end\{document\})'),
+            (r'certifications', r'\\section\{[Cc]ertifications?\}(.*?)(?=\\section|\\end\{document\})'),
+        ]
+
+        for name, pattern in section_patterns:
+            match = re.search(pattern, content, re.DOTALL | re.IGNORECASE)
+            if match:
+                sections[name] = match.group(1).strip()
+
+        return sections
 
 
 @dataclass
@@ -71,8 +269,9 @@ class ResumeValidator:
         'mentored', 'modernized', 'orchestrated', 'pioneered', 'spearheaded'
     }
 
-    def __init__(self, all_keywords: List[str]):
+    def __init__(self, all_keywords: List[str], prioritized_keywords: Dict[str, List[str]] = None):
         self.all_keywords = [k.lower() for k in all_keywords]
+        self.prioritized_keywords = prioritized_keywords or {}
 
     def validate(self, latex_content: str) -> ValidationResult:
         """Validate the resume against all rules."""
@@ -83,7 +282,9 @@ class ResumeValidator:
         verb_counts = Counter()
         for analysis in bullet_analyses:
             if analysis.action_verb:
-                verb_counts[analysis.action_verb.lower()] += 1
+                # Normalize verb (handle past tense)
+                verb = analysis.action_verb.lower().rstrip('ed').rstrip('d')
+                verb_counts[verb] += 1
 
         repeated_verbs = [v for v, c in verb_counts.items() if c > 2]
 
@@ -91,10 +292,8 @@ class ResumeValidator:
         bullets_wrong_length = sum(1 for a in bullet_analyses if not a.is_valid_length)
         bullets_no_quant = sum(1 for a in bullet_analyses if not a.has_quantification)
 
-        # Check keyword coverage
-        latex_lower = latex_content.lower()
-        matched = [k for k in self.all_keywords if k in latex_lower]
-        missing = [k for k in self.all_keywords if k not in latex_lower]
+        # Check keyword coverage using smart matching
+        matched, missing = KeywordMatcher.count_matches(self.all_keywords, latex_content)
         coverage = len(matched) / len(self.all_keywords) if self.all_keywords else 1.0
 
         # Generate suggestions
@@ -154,9 +353,8 @@ class ResumeValidator:
         quantifications = re.findall(quant_pattern, bullet_text)
         quants = [q[0] or q[1] for q in quantifications if q[0] or q[1]]
 
-        # Find keywords in bullet
-        bullet_lower = bullet_text.lower()
-        keywords_found = [k for k in self.all_keywords if k in bullet_lower]
+        # Find keywords in bullet using smart matching
+        keywords_found, _ = KeywordMatcher.count_matches(self.all_keywords, bullet_text)
 
         return BulletAnalysis(
             text=bullet_text,
@@ -193,11 +391,47 @@ class AIResumeTailorAsync:
     ) -> AsyncGenerator[Dict, None]:
         """Async multi-pass tailoring with progress updates."""
 
+        # Step 0: Validate and sanitize input
+        yield {"step": "validating_input", "message": "Validating input...", "progress": 5}
+
+        # Sanitize inputs
+        resume_latex = LaTeXValidator.sanitize_input(resume_latex)
+        job_description = job_description.strip() if job_description else ""
+
+        # Validate resume LaTeX
+        is_valid, issues = LaTeXValidator.validate(resume_latex)
+        if not is_valid:
+            yield {
+                "step": "error",
+                "message": f"Invalid LaTeX input: {', '.join(issues)}",
+                "progress": 0
+            }
+            return
+
+        if not job_description:
+            yield {
+                "step": "error",
+                "message": "Job description is empty",
+                "progress": 0
+            }
+            return
+
         # Step 1: Analyze job
         yield {"step": "analyzing", "message": "Analyzing job description...", "progress": 10}
-        job_analysis = await self._analyze_job(job_description)
+
+        try:
+            job_analysis = await self._analyze_job(job_description)
+        except Exception as e:
+            yield {
+                "step": "error",
+                "message": f"Failed to analyze job description: {str(e)}",
+                "progress": 0
+            }
+            return
+
         all_keywords = self._get_all_keywords(job_analysis)
-        validator = ResumeValidator(all_keywords)
+        prioritized = self._get_prioritized_keywords(job_analysis)
+        validator = ResumeValidator(all_keywords, prioritized)
 
         yield {
             "step": "analyzed",
@@ -259,10 +493,14 @@ class AIResumeTailorAsync:
             if pass_num < max_passes - 1:
                 tailored = await self._fix_violations(tailored, validation, job_analysis)
 
-        # Step 3: Final validation
+        # Step 3: Post-generation verification pass
+        yield {"step": "verifying", "message": "Running verification pass...", "progress": 78}
+        tailored = await self._verify_and_fix_output(tailored, validator)
+
+        # Step 4: Final validation
         validation = validator.validate(tailored)
 
-        # Step 4: Generate suggestions
+        # Step 5: Generate suggestions
         yield {"step": "suggestions", "message": "Generating improvement suggestions...", "progress": 85}
         bullet_suggestions = await self._generate_bullet_suggestions(
             tailored, validation.missing_keywords, job_analysis
@@ -311,27 +549,50 @@ class AIResumeTailorAsync:
     def _get_all_keywords(self, job_analysis: Dict) -> List[str]:
         """Extract ALL keywords from job analysis for ATS matching."""
         keywords = []
-        # Core technical skills
+        # Core technical skills (highest priority)
         keywords.extend(job_analysis.get('required_skills', []))
-        keywords.extend(job_analysis.get('preferred_skills', []))
+        keywords.extend(job_analysis.get('must_include_phrases', []))
+        # Key technologies
         keywords.extend(job_analysis.get('key_technologies', []))
-        # Programming and frameworks
         keywords.extend(job_analysis.get('programming_languages', []))
         keywords.extend(job_analysis.get('frameworks_libraries', []))
+        # Preferred skills (medium priority)
+        keywords.extend(job_analysis.get('preferred_skills', []))
         # Industry and domain
         keywords.extend(job_analysis.get('industry_terms', []))
         keywords.extend(job_analysis.get('certifications', []))
-        # Must-have phrases
-        keywords.extend(job_analysis.get('must_include_phrases', []))
         # Deduplicate while preserving order
         seen = set()
         unique_keywords = []
         for k in keywords:
-            k_lower = k.lower()
-            if k_lower not in seen:
+            if not k or not isinstance(k, str):
+                continue
+            k_lower = k.lower().strip()
+            if k_lower and k_lower not in seen:
                 seen.add(k_lower)
                 unique_keywords.append(k)
         return unique_keywords
+
+    def _get_prioritized_keywords(self, job_analysis: Dict) -> Dict[str, List[str]]:
+        """Get keywords organized by priority for smarter placement."""
+        return {
+            'critical': (
+                job_analysis.get('required_skills', []) +
+                job_analysis.get('must_include_phrases', [])
+            ),
+            'high': (
+                job_analysis.get('key_technologies', []) +
+                job_analysis.get('programming_languages', [])
+            ),
+            'medium': (
+                job_analysis.get('preferred_skills', []) +
+                job_analysis.get('frameworks_libraries', [])
+            ),
+            'low': (
+                job_analysis.get('industry_terms', []) +
+                job_analysis.get('certifications', [])
+            )
+        }
 
     async def _analyze_job(self, job_description: str) -> Dict:
         prompt = f"""You are an expert ATS (Applicant Tracking System) keyword extraction specialist. Your task is to perform an EXHAUSTIVE analysis of this job description to extract EVERY possible keyword, phrase, and term that an ATS system would scan for.
@@ -634,30 +895,127 @@ RULE 6: STRUCTURE CONSTRAINTS
                               YOUR TASK
 ══════════════════════════════════════════════════════════════════════════════
 
-Generate the complete tailored LaTeX resume following ALL rules above.
+STEP-BY-STEP PROCESS (follow this exactly):
 
-CHECKLIST BEFORE SUBMITTING:
+STEP 1: ANALYZE THE ORIGINAL RESUME
+• Identify all sections (Education, Experience, Projects, Skills, Certifications)
+• Note which sections are PROTECTED (Education, Certifications - copy exactly)
+• Count current bullets per experience
+
+STEP 2: PLAN KEYWORD PLACEMENT
+• List the top 20 most important keywords from the job
+• For each keyword, identify which EXPERIENCE or PROJECT bullet can incorporate it
+• Plan verb usage - assign different verbs to each bullet (no repeats >2x)
+
+STEP 3: WRITE EACH BULLET WITH VERIFICATION
+For each bullet, do this:
+a) Write the bullet
+b) Count the words: "Word 1, Word 2, Word 3..." until you reach the end
+c) Verify count is 28-32. If not, adjust and recount.
+d) Verify it has \\textbf{{number}}. If not, add one.
+e) Check verb hasn't been used >2x. If so, replace.
+
+STEP 4: FINAL VERIFICATION
+Before outputting, verify:
 ☐ EDUCATION section is UNCHANGED from original
 ☐ CERTIFICATIONS section is UNCHANGED from original
-☐ Keywords integrated into EXPERIENCE bullets (priority 1)
-☐ Keywords integrated into PROJECTS bullets (priority 2)
-☐ Skills section has ONLY overflow keywords (not bloated)
-☐ Resume fits on ONE PAGE (critical!)
-☐ Every bullet is 28-32 words (counted)
-☐ Every number wrapped in \\textbf{{}}
-☐ No verb used more than twice
+☐ Header/contact info is UNCHANGED
+☐ Every bullet is 28-32 words (you counted each one)
+☐ Every number is wrapped in \\textbf{{}}
+☐ No action verb appears more than 2 times total
+☐ Keywords are in EXPERIENCE/PROJECTS, not bloating skills
+☐ Resume will fit on ONE PAGE
+
+══════════════════════════════════════════════════════════════════════════════
+                           SELF-VERIFICATION EXAMPLE
+══════════════════════════════════════════════════════════════════════════════
+
+Before including this bullet, I verify:
+"Architected and deployed \\textbf{{5}} cloud-native endpoint detection solutions..."
+
+Word count: Architected(1) and(2) deployed(3) \\textbf{{5}}(4) cloud-native(5) endpoint(6)
+detection(7) solutions(8)... = 30 words ✓
+
+Has \\textbf{{}}: Yes, \\textbf{{5}} ✓
+Verb "Architected": Used 1 time total ✓
+
+INCLUDE THIS BULLET.
+
+══════════════════════════════════════════════════════════════════════════════
 
 Return ONLY the complete LaTeX document, no explanations or markdown."""
 
-        response = await self.client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=8000,
-            messages=[{"role": "user", "content": prompt}]
+        async def make_request():
+            return await self.client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=8000,
+                messages=[{"role": "user", "content": prompt}]
+            )
+
+        # Retry with exponential backoff on API errors
+        response = await retry_with_backoff(
+            make_request,
+            max_retries=3,
+            base_delay=2.0,
+            exceptions=(Exception,)
         )
 
         output = response.content[0].text
         output = re.sub(r'```latex\n?|```\n?', '', output)
         return output.strip()
+
+    async def _verify_and_fix_output(self, latex: str, validator: ResumeValidator) -> str:
+        """Post-generation verification pass to catch any remaining issues."""
+        validation = validator.validate(latex)
+
+        # If mostly valid, return as-is
+        if validation.is_valid or (
+            validation.bullets_wrong_length <= 1 and
+            validation.bullets_no_quantification == 0 and
+            len(validation.repeated_verbs) == 0
+        ):
+            return latex
+
+        # Otherwise, do a quick targeted fix
+        issues = []
+        for b in validation.bullet_analyses:
+            if not b.is_valid_length:
+                issues.append(f"Bullet has {b.word_count} words (need 28-32): \"{b.text[:50]}...\"")
+
+        if not issues:
+            return latex
+
+        prompt = f"""Fix ONLY these word count issues. Keep everything else the same.
+
+ISSUES:
+{chr(10).join(issues[:5])}
+
+RESUME:
+{latex}
+
+Rules:
+• Adjust each flagged bullet to EXACTLY 28-32 words
+• Keep all other bullets unchanged
+• Keep all \\textbf{{}} formatting
+• Keep Education/Certifications unchanged
+
+Return ONLY the fixed LaTeX."""
+
+        async def make_request():
+            return await self.client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=8000,
+                messages=[{"role": "user", "content": prompt}]
+            )
+
+        try:
+            response = await retry_with_backoff(make_request, max_retries=2)
+            output = response.content[0].text
+            output = re.sub(r'```latex\n?|```\n?', '', output)
+            return output.strip()
+        except Exception:
+            # If verification fix fails, return original
+            return latex
 
     async def _fix_violations(self, latex: str, validation: ValidationResult, job_analysis: Dict) -> str:
         """Fix specific rule violations in the resume with targeted corrections."""
