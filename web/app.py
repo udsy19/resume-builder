@@ -205,30 +205,17 @@ async def tailor_resume(request: TailorRequest):
 
 @app.post("/api/analyze-job")
 async def analyze_job(job_description: str = Form(...)):
-    """Analyze job description with AI."""
-    try:
-        from src.ai_tailor import AIResumeTailorAsync
-
-        tailor = AIResumeTailorAsync()
-        analysis = await tailor._analyze_job(job_description)
-
-        return JSONResponse({
-            "role_title": analysis.get("role_title", ""),
-            "company": analysis.get("company", ""),
-            "required_skills": analysis.get("required_skills", []),
-            "preferred_skills": analysis.get("preferred_skills", []),
-            "key_technologies": analysis.get("key_technologies", []),
-            "soft_skills": analysis.get("soft_skills", []),
-            "action_verbs": analysis.get("action_verbs", []),
-            "industry_terms": analysis.get("industry_terms", []),
-            "key_responsibilities": analysis.get("key_responsibilities", []),
-            "culture_keywords": analysis.get("culture_keywords", []),
-            "must_include_phrases": analysis.get("must_include_phrases", [])
-        })
-
-    except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+    """Analyze job description - now integrated into main tailor call."""
+    # This endpoint is deprecated - job analysis is now part of the main tailor call
+    # Return a simple response for backwards compatibility
+    return JSONResponse({
+        "message": "Job analysis is now integrated into the Generate Tailored Resume function for faster performance.",
+        "role_title": "",
+        "company": "",
+        "required_skills": [],
+        "preferred_skills": [],
+        "key_technologies": []
+    })
 
 
 @app.post("/api/import-url")
@@ -312,11 +299,10 @@ async def import_job_url(request: URLImportRequest):
 async def validate_resume(latex_content: str = Form(...), keywords: str = Form("")):
     """Validate resume against rules."""
     try:
-        from src.ai_tailor import ResumeValidator
+        from src.ai_tailor import FastValidator
 
         keyword_list = [k.strip() for k in keywords.split(",") if k.strip()]
-        validator = ResumeValidator(keyword_list)
-        result = validator.validate(latex_content)
+        result = FastValidator.validate(latex_content, keyword_list)
 
         return JSONResponse({
             "is_valid": result.is_valid,
@@ -353,16 +339,17 @@ async def edit_bullet(request: EditBulletRequest):
         # Replace old bullet with new bullet
         new_latex = request.latex_content.replace(request.old_bullet, request.new_bullet)
 
-        # Validate the change
-        from src.ai_tailor import ResumeValidator
-        validator = ResumeValidator([])
-        bullets = validator._extract_bullets(new_latex)
+        # Validate the change using FastValidator
+        from src.ai_tailor import FastValidator
 
-        # Find the edited bullet
+        # Validate and find the edited bullet
+        result = FastValidator.validate(new_latex, [])
+
+        # Find the edited bullet analysis
         edited_analysis = None
-        for bullet in bullets:
-            if request.new_bullet in bullet or bullet in request.new_bullet:
-                edited_analysis = validator._analyze_bullet(bullet)
+        for b in result.bullet_analyses:
+            if request.new_bullet in b.text or b.text in request.new_bullet:
+                edited_analysis = b
                 break
 
         return JSONResponse({
