@@ -309,41 +309,166 @@ class AIResumeTailorAsync:
         return result
 
     def _get_all_keywords(self, job_analysis: Dict) -> List[str]:
+        """Extract ALL keywords from job analysis for ATS matching."""
         keywords = []
+        # Core technical skills
         keywords.extend(job_analysis.get('required_skills', []))
         keywords.extend(job_analysis.get('preferred_skills', []))
         keywords.extend(job_analysis.get('key_technologies', []))
+        # Programming and frameworks
+        keywords.extend(job_analysis.get('programming_languages', []))
+        keywords.extend(job_analysis.get('frameworks_libraries', []))
+        # Industry and domain
         keywords.extend(job_analysis.get('industry_terms', []))
+        keywords.extend(job_analysis.get('certifications', []))
+        # Must-have phrases
         keywords.extend(job_analysis.get('must_include_phrases', []))
-        return keywords
+        # Deduplicate while preserving order
+        seen = set()
+        unique_keywords = []
+        for k in keywords:
+            k_lower = k.lower()
+            if k_lower not in seen:
+                seen.add(k_lower)
+                unique_keywords.append(k)
+        return unique_keywords
 
     async def _analyze_job(self, job_description: str) -> Dict:
-        prompt = f"""Analyze this job description and extract ALL keywords for ATS optimization.
+        prompt = f"""You are an expert ATS (Applicant Tracking System) keyword extraction specialist. Your task is to perform an EXHAUSTIVE analysis of this job description to extract EVERY possible keyword, phrase, and term that an ATS system would scan for.
 
-JOB DESCRIPTION:
+=== JOB DESCRIPTION ===
 {job_description}
 
-Return JSON:
+=== EXTRACTION INSTRUCTIONS ===
+
+You MUST extract EVERY term in each category. ATS systems are literal - they scan for exact keyword matches. Missing even ONE important keyword can cause a resume to be filtered out.
+
+EXTRACTION RULES:
+1. Extract EXACT phrases as they appear (e.g., "machine learning" not just "ML")
+2. Include BOTH the acronym AND full form (e.g., "AWS" AND "Amazon Web Services")
+3. Include ALL variations (e.g., "Python", "Python 3", "Python programming")
+4. Extract skills from REQUIREMENTS, RESPONSIBILITIES, QUALIFICATIONS, and NICE-TO-HAVES
+5. Include implied skills (if they mention "deploy to cloud", include "cloud deployment", "CI/CD", etc.)
+6. Extract action verbs EXACTLY as used in the job posting
+7. Include industry-specific terminology and jargon
+8. Extract certifications mentioned or implied
+9. Include soft skills and leadership qualities mentioned
+10. Extract company values and culture keywords
+
+=== REQUIRED OUTPUT FORMAT ===
+
+Return a JSON object with these EXACT keys:
 {{
-    "role_title": "exact job title",
-    "company": "company name",
-    "required_skills": ["ALL required technical skills"],
-    "preferred_skills": ["ALL preferred/nice-to-have skills"],
-    "key_technologies": ["ALL tools, languages, platforms, frameworks"],
-    "soft_skills": ["ALL soft/interpersonal skills"],
-    "action_verbs": ["ALL action verbs from responsibilities"],
-    "industry_terms": ["ALL domain-specific terms"],
-    "experience_level": "years required",
-    "key_responsibilities": ["each main responsibility"],
-    "culture_keywords": ["company culture/values words"],
-    "must_include_phrases": ["exact phrases that MUST appear"]
+    "role_title": "The exact job title as stated",
+    "company": "Company name if mentioned",
+    "seniority_level": "junior/mid/senior/lead/principal/staff",
+    "years_experience": "X+ years or range",
+
+    "required_skills": [
+        "EVERY technical skill marked as required",
+        "Include programming languages, frameworks, tools",
+        "Include methodologies (Agile, Scrum, etc.)",
+        "Include both specific versions and general terms"
+    ],
+
+    "preferred_skills": [
+        "ALL nice-to-have or preferred skills",
+        "Skills mentioned as 'bonus' or 'plus'",
+        "Skills mentioned in 'ideal candidate' section"
+    ],
+
+    "key_technologies": [
+        "ALL tools, platforms, software mentioned",
+        "Cloud platforms (AWS, GCP, Azure) with specific services",
+        "Databases (SQL, PostgreSQL, MongoDB, etc.)",
+        "DevOps tools (Docker, Kubernetes, Jenkins, etc.)",
+        "Monitoring tools (Splunk, Datadog, etc.)",
+        "Security tools if applicable",
+        "Include BOTH abbreviations AND full names"
+    ],
+
+    "programming_languages": [
+        "ALL languages mentioned",
+        "Include scripting languages",
+        "Include query languages (SQL, GraphQL)"
+    ],
+
+    "frameworks_libraries": [
+        "ALL frameworks mentioned",
+        "ALL libraries mentioned",
+        "Frontend frameworks (React, Vue, Angular)",
+        "Backend frameworks (Django, Flask, Spring)",
+        "Testing frameworks"
+    ],
+
+    "soft_skills": [
+        "Communication skills mentioned",
+        "Leadership qualities",
+        "Collaboration/teamwork terms",
+        "Problem-solving abilities",
+        "Analytical skills"
+    ],
+
+    "action_verbs": [
+        "EVERY action verb used in responsibilities",
+        "Verbs from 'you will...' sections",
+        "Verbs from 'responsibilities include...' sections",
+        "Examples: design, develop, implement, lead, manage, collaborate, deploy, architect, optimize"
+    ],
+
+    "industry_terms": [
+        "Domain-specific terminology",
+        "Industry jargon",
+        "Compliance terms (SOC2, HIPAA, PCI-DSS, etc.)",
+        "Methodology terms",
+        "Architecture patterns mentioned"
+    ],
+
+    "certifications": [
+        "ANY certifications mentioned",
+        "Implied certifications (if security role, include common security certs)",
+        "Cloud certifications",
+        "Industry certifications"
+    ],
+
+    "key_responsibilities": [
+        "Each main responsibility area",
+        "Core job functions",
+        "Primary deliverables"
+    ],
+
+    "culture_keywords": [
+        "Company values mentioned",
+        "Work environment descriptors",
+        "Team culture terms"
+    ],
+
+    "must_include_phrases": [
+        "Exact multi-word phrases that MUST appear in resume",
+        "Technical phrases as written",
+        "Methodology names",
+        "Specific tool combinations"
+    ],
+
+    "education_requirements": [
+        "Degree requirements",
+        "Field of study preferences",
+        "Equivalent experience clauses"
+    ]
 }}
 
-Be EXHAUSTIVE. Return ONLY JSON."""
+=== CRITICAL REMINDERS ===
+• Be EXHAUSTIVE - ATS systems are literal matchers
+• Include SYNONYMS and VARIATIONS of each term
+• Extract from EVERY section of the job posting
+• Include implied/related skills that would logically be required
+• When in doubt, INCLUDE the term - more keywords = better matching
+
+Return ONLY the JSON object, no additional text."""
 
         response = await self.client.messages.create(
             model="claude-sonnet-4-20250514",
-            max_tokens=3000,
+            max_tokens=4000,
             messages=[{"role": "user", "content": prompt}]
         )
 
@@ -366,40 +491,140 @@ Be EXHAUSTIVE. Return ONLY JSON."""
         is_refinement: bool = False
     ) -> str:
         all_keywords = self._get_all_keywords(job_analysis)
+        action_verbs = job_analysis.get('action_verbs', [])
 
         refinement_note = """
-IMPORTANT: REFINEMENT pass - previous had violations. Fix:
-- Bullets must be 24-28 words
-- Numbers must be in \\textbf{}
-- No verb >2x
+══════════════════════════════════════════════════════════════════════════════
+⚠️  CRITICAL: THIS IS A REFINEMENT PASS - PREVIOUS VERSION HAD VIOLATIONS ⚠️
+══════════════════════════════════════════════════════════════════════════════
+
+The previous version violated one or more rules. You MUST fix these issues:
+• Count EVERY word in EVERY bullet - must be EXACTLY 24-28 words
+• Wrap ALL numbers, percentages, dollar amounts in \\textbf{{}}
+• Check verb usage - NO action verb can appear more than TWICE total
+• Naturally incorporate any missing keywords
+
+Before submitting, VERIFY each bullet by counting words one by one.
 """ if is_refinement else ""
 
-        prompt = f"""Expert ATS optimizer. Create perfectly formatted resume.
+        prompt = f"""You are an elite ATS (Applicant Tracking System) resume optimization expert. Your task is to transform this resume to MAXIMIZE ATS keyword matching while following STRICT formatting rules.
 
-ORIGINAL:
+══════════════════════════════════════════════════════════════════════════════
+                              ORIGINAL RESUME
+══════════════════════════════════════════════════════════════════════════════
 {resume_latex}
 
-JOB:
+══════════════════════════════════════════════════════════════════════════════
+                            TARGET JOB DESCRIPTION
+══════════════════════════════════════════════════════════════════════════════
 {job_description}
 
-KEYWORDS:
+══════════════════════════════════════════════════════════════════════════════
+                    KEYWORDS TO INCORPORATE (MUST INCLUDE ALL)
+══════════════════════════════════════════════════════════════════════════════
 {', '.join(all_keywords)}
 
-VERBS:
-{', '.join(job_analysis.get('action_verbs', []))}
+══════════════════════════════════════════════════════════════════════════════
+                         ACTION VERBS FROM JOB POSTING
+══════════════════════════════════════════════════════════════════════════════
+{', '.join(action_verbs)}
 {refinement_note}
+══════════════════════════════════════════════════════════════════════════════
+                    ⚡ ABSOLUTE RULES - ZERO TOLERANCE ⚡
+══════════════════════════════════════════════════════════════════════════════
 
-RULES:
-1. Bullets: 24-28 words exactly
-2. Verbs: No repeat >2x. Use: designed, deployed, implemented, built, led, managed, collaborated, optimized, automated, analyzed, researched, secured, integrated, developed, created, established, executed, configured, architected, enhanced
-3. Metrics: ALL numbers in \\textbf{{}}: \\textbf{{40\\%}}, \\textbf{{25+}}
-4. Keywords: ALL must appear naturally
-5. Max {max_experiences} exp, {max_bullets} bullets each, ONE page
+RULE 1: BULLET POINT LENGTH (CRITICAL - COUNT EVERY WORD)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+• Each \\resumeItem MUST contain EXACTLY 24-28 words
+• Count contractions as ONE word (don't = 1 word)
+• Count hyphenated terms as ONE word (cloud-native = 1 word)
+• Numbers count as words (\\textbf{{40\\%}} = 1 word)
+• Articles (a, an, the) count as words
+• VERIFY: Count each bullet's words before including it
 
-EXAMPLE (26 words):
-\\resumeItem{{Designed and deployed \\textbf{{5}} endpoint detection controls across \\textbf{{3}} cloud-native Linux environments, reducing security incidents by \\textbf{{40\\%}} through automated threat detection.}}
+RULE 2: ACTION VERB DIVERSITY (STRICTLY ENFORCED)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+• Every bullet MUST start with a strong action verb in past tense
+• NO action verb can be used MORE than TWICE in the ENTIRE resume
+• Track your verb usage as you write:
 
-Return ONLY LaTeX."""
+  VERB BANK (use max 2x each):
+  Tier 1 (Strong): Architected, Spearheaded, Pioneered, Orchestrated, Engineered
+  Tier 2 (Impact): Transformed, Revolutionized, Accelerated, Maximized, Elevated
+  Tier 3 (Technical): Implemented, Deployed, Configured, Integrated, Automated
+  Tier 4 (Analysis): Analyzed, Investigated, Researched, Assessed, Evaluated
+  Tier 5 (Leadership): Led, Managed, Directed, Supervised, Mentored, Coordinated
+  Tier 6 (Creation): Designed, Developed, Built, Created, Established, Launched
+  Tier 7 (Improvement): Optimized, Enhanced, Streamlined, Improved, Refined
+  Tier 8 (Security): Secured, Protected, Hardened, Fortified, Safeguarded
+  Tier 9 (Collaboration): Collaborated, Partnered, Facilitated, Liaised, Advised
+  Tier 10 (Execution): Executed, Delivered, Achieved, Accomplished, Completed
+
+RULE 3: QUANTIFICATION (EVERY BULLET MUST HAVE METRICS)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+• EVERY bullet MUST contain at least ONE quantified metric
+• ALL numbers MUST be wrapped in \\textbf{{}}
+• Formats:
+  - Percentages: \\textbf{{40\\%}}, \\textbf{{95\\%}}
+  - Numbers: \\textbf{{5}}, \\textbf{{100+}}, \\textbf{{25+}}
+  - Money: \\textbf{{\\$2M}}, \\textbf{{\\$500K}}
+  - Time: \\textbf{{6}} months, \\textbf{{24/7}}
+  - Scale: \\textbf{{10,000+}} users, \\textbf{{50+}} endpoints
+• If original bullet lacks metrics, ADD realistic ones based on context
+
+RULE 4: KEYWORD INTEGRATION (ATS OPTIMIZATION)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+• Include ALL keywords from the KEYWORDS section above
+• Use EXACT phrases from job description where possible
+• Integrate naturally - don't force awkward keyword stuffing
+• Technical terms should match job posting exactly
+• Include BOTH acronyms AND full forms when space allows
+
+RULE 5: STRUCTURE CONSTRAINTS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+• Maximum {max_experiences} work experiences
+• Maximum {max_bullets} bullets per experience
+• MUST fit on ONE page
+• Preserve the original LaTeX structure and formatting
+• Keep all \\resumeSubheading formatting intact
+
+══════════════════════════════════════════════════════════════════════════════
+                              EXAMPLE BULLETS
+══════════════════════════════════════════════════════════════════════════════
+
+✅ CORRECT (26 words, starts with action verb, has \\textbf{{}} metrics):
+\\resumeItem{{Architected and deployed \\textbf{{5}} cloud-native endpoint detection and response solutions across \\textbf{{3}} AWS environments, reducing mean time to detection by \\textbf{{40\\%}} through automated threat correlation.}}
+
+✅ CORRECT (25 words):
+\\resumeItem{{Spearheaded implementation of zero-trust security framework protecting \\textbf{{10,000+}} endpoints, achieving \\textbf{{99.9\\%}} uptime while reducing unauthorized access attempts by \\textbf{{75\\%}} through continuous authentication.}}
+
+✅ CORRECT (27 words):
+\\resumeItem{{Led cross-functional team of \\textbf{{8}} engineers to migrate legacy infrastructure to Kubernetes, decreasing deployment time from \\textbf{{4}} hours to \\textbf{{15}} minutes while improving system reliability by \\textbf{{60\\%}}.}}
+
+❌ WRONG (only 18 words - TOO SHORT):
+\\resumeItem{{Implemented security controls across cloud environments, reducing incidents by 40\\% through automated detection.}}
+
+❌ WRONG (35 words - TOO LONG):
+\\resumeItem{{Designed and implemented a comprehensive security monitoring solution that integrated with multiple cloud platforms including AWS and GCP to provide real-time threat detection and automated incident response capabilities for the entire organization.}}
+
+❌ WRONG (no \\textbf{{}} around numbers):
+\\resumeItem{{Deployed 5 endpoint detection controls across 3 environments, reducing security incidents by 40 percent.}}
+
+❌ WRONG (doesn't start with action verb):
+\\resumeItem{{The security team worked on implementing 5 new controls that reduced incidents significantly.}}
+
+══════════════════════════════════════════════════════════════════════════════
+                              YOUR TASK
+══════════════════════════════════════════════════════════════════════════════
+
+Generate the complete tailored LaTeX resume following ALL rules above.
+• Preserve the exact LaTeX document structure
+• Transform each bullet to match the target job
+• Verify EVERY bullet is 24-28 words by counting
+• Ensure EVERY number is wrapped in \\textbf{{}}
+• Track verb usage - no verb more than twice
+
+Return ONLY the complete LaTeX document, no explanations or markdown."""
 
         response = await self.client.messages.create(
             model="claude-sonnet-4-20250514",
@@ -412,32 +637,112 @@ Return ONLY LaTeX."""
         return output.strip()
 
     async def _fix_violations(self, latex: str, validation: ValidationResult, job_analysis: Dict) -> str:
-        issues = []
+        """Fix specific rule violations in the resume with targeted corrections."""
 
-        if validation.bullets_wrong_length > 0:
-            for b in [a for a in validation.bullet_analyses if not a.is_valid_length][:3]:
-                issues.append(f"Bullet ({b.word_count} words): '{b.text[:50]}...'")
+        # Build detailed issue report
+        length_issues = []
+        quant_issues = []
+        for b in validation.bullet_analyses:
+            if not b.is_valid_length:
+                direction = "ADD" if b.word_count < 24 else "REMOVE"
+                diff = abs(26 - b.word_count)  # Target middle of range
+                length_issues.append(
+                    f"  • [{b.word_count} words, need 24-28, {direction} ~{diff} words]\n"
+                    f"    Current: \"{b.text[:80]}{'...' if len(b.text) > 80 else ''}\""
+                )
+            if not b.has_quantification:
+                quant_issues.append(
+                    f"  • Missing \\textbf{{metric}}: \"{b.text[:60]}...\""
+                )
 
-        if validation.bullets_no_quantification > 0:
-            for b in [a for a in validation.bullet_analyses if not a.has_quantification][:3]:
-                issues.append(f"Needs \\textbf{{num}}: '{b.text[:50]}...'")
+        issues_text = ""
+
+        if length_issues:
+            issues_text += f"""
+══════════════════════════════════════════════════════════════════════════════
+              ❌ WORD COUNT VIOLATIONS ({len(length_issues)} bullets)
+══════════════════════════════════════════════════════════════════════════════
+{chr(10).join(length_issues[:5])}
+
+FIX STRATEGY:
+• If too SHORT: Add context, specifics, or additional impact metrics
+• If too LONG: Remove filler words, combine phrases, use concise terms
+• TARGET: Aim for 26 words (middle of 24-28 range)
+"""
+
+        if quant_issues:
+            issues_text += f"""
+══════════════════════════════════════════════════════════════════════════════
+              ❌ MISSING QUANTIFICATION ({len(quant_issues)} bullets)
+══════════════════════════════════════════════════════════════════════════════
+{chr(10).join(quant_issues[:5])}
+
+FIX STRATEGY:
+• Add realistic metrics: \\textbf{{X\\%}}, \\textbf{{Y+}}, \\textbf{{\\$ZM}}
+• Every bullet NEEDS at least one \\textbf{{}} wrapped number
+• Common metrics: reduction %, team size, users impacted, cost savings, time saved
+"""
 
         if validation.repeated_verbs:
-            issues.append(f"Overused verbs: {', '.join(validation.repeated_verbs)}")
+            issues_text += f"""
+══════════════════════════════════════════════════════════════════════════════
+              ❌ OVERUSED VERBS (max 2x each allowed)
+══════════════════════════════════════════════════════════════════════════════
+Verbs used too many times: {', '.join(validation.repeated_verbs)}
+Current verb counts: {validation.verb_counts}
+
+FIX STRATEGY: Replace with alternatives:
+• "Implemented" → Deployed, Configured, Integrated, Established
+• "Developed" → Built, Created, Engineered, Designed
+• "Managed" → Directed, Supervised, Coordinated, Oversaw
+• "Led" → Spearheaded, Headed, Championed, Drove
+• "Designed" → Architected, Crafted, Devised, Formulated
+"""
 
         if validation.missing_keywords:
-            issues.append(f"Missing: {', '.join(validation.missing_keywords[:5])}")
+            issues_text += f"""
+══════════════════════════════════════════════════════════════════════════════
+              ⚠️ MISSING KEYWORDS (ATS optimization)
+══════════════════════════════════════════════════════════════════════════════
+Must incorporate: {', '.join(validation.missing_keywords[:10])}
 
-        prompt = f"""Fix these issues:
+FIX STRATEGY:
+• Weave keywords naturally into existing bullets
+• Replace generic terms with job-specific keywords
+• Add technical specifics that match job requirements
+"""
 
-{chr(10).join(issues)}
+        prompt = f"""You are an expert resume editor. Fix the SPECIFIC violations listed below.
 
-RESUME:
+{issues_text}
+
+══════════════════════════════════════════════════════════════════════════════
+                           CURRENT RESUME TO FIX
+══════════════════════════════════════════════════════════════════════════════
 {latex}
 
-RULES: 24-28 words, \\textbf{{numbers}}, no verb >2x
+══════════════════════════════════════════════════════════════════════════════
+                              REPAIR INSTRUCTIONS
+══════════════════════════════════════════════════════════════════════════════
 
-Return ONLY fixed LaTeX."""
+1. For EACH bullet with wrong word count:
+   • Count the current words
+   • Adjust to be EXACTLY 24-28 words
+   • Verify by recounting before including
+
+2. For EACH bullet missing quantification:
+   • Add a realistic metric wrapped in \\textbf{{}}
+   • Examples: \\textbf{{40\\%}}, \\textbf{{5}}, \\textbf{{\\$2M}}
+
+3. For EACH overused verb:
+   • Replace with a synonym from a different tier
+   • Ensure no verb appears more than 2x total
+
+4. For missing keywords:
+   • Integrate naturally into relevant bullets
+   • Don't force awkward phrasing
+
+Return ONLY the complete fixed LaTeX document. No explanations."""
 
         response = await self.client.messages.create(
             model="claude-sonnet-4-20250514",
@@ -455,25 +760,72 @@ Return ONLY fixed LaTeX."""
         missing_keywords: List[str],
         job_analysis: Dict
     ) -> List[Dict]:
+        """Generate actionable suggestions for incorporating missing keywords."""
         if not missing_keywords:
             return []
 
-        prompt = f"""Suggest how to add missing keywords to resume.
+        prompt = f"""You are an expert resume optimization consultant. Your task is to provide SPECIFIC, ACTIONABLE suggestions for incorporating missing ATS keywords into the resume.
 
-RESUME:
+══════════════════════════════════════════════════════════════════════════════
+                              CURRENT RESUME
+══════════════════════════════════════════════════════════════════════════════
 {latex}
 
-MISSING:
+══════════════════════════════════════════════════════════════════════════════
+                          MISSING KEYWORDS TO ADD
+══════════════════════════════════════════════════════════════════════════════
 {', '.join(missing_keywords)}
 
-Return JSON array:
-[{{"keyword": "...", "suggestion": "how to incorporate this keyword"}}]
+══════════════════════════════════════════════════════════════════════════════
+                         JOB CONTEXT & REQUIREMENTS
+══════════════════════════════════════════════════════════════════════════════
+Role: {job_analysis.get('role_title', 'Not specified')}
+Key Responsibilities: {', '.join(job_analysis.get('key_responsibilities', [])[:5])}
 
-Return ONLY JSON."""
+══════════════════════════════════════════════════════════════════════════════
+                              YOUR TASK
+══════════════════════════════════════════════════════════════════════════════
+
+For EACH missing keyword, provide a specific suggestion on how to incorporate it.
+
+REQUIREMENTS FOR EACH SUGGESTION:
+1. Identify which EXISTING bullet point could be modified to include the keyword
+2. Show the CURRENT bullet text
+3. Provide a REWRITTEN bullet that:
+   • Includes the missing keyword naturally
+   • Is EXACTLY 24-28 words (count carefully!)
+   • Maintains \\textbf{{}} around all metrics
+   • Starts with a strong action verb
+   • Preserves the original meaning/achievement
+
+══════════════════════════════════════════════════════════════════════════════
+                           REQUIRED OUTPUT FORMAT
+══════════════════════════════════════════════════════════════════════════════
+
+Return a JSON array with this EXACT structure:
+[
+    {{
+        "keyword": "the missing keyword",
+        "current_bullet": "the existing bullet text that can be modified",
+        "suggested_bullet": "the rewritten bullet WITH the keyword (24-28 words, with \\\\textbf{{}} metrics)",
+        "location": "which experience/section contains this bullet",
+        "word_count": 26,
+        "explanation": "brief note on how the keyword was integrated"
+    }}
+]
+
+IMPORTANT:
+• Provide suggestions for up to 10 keywords
+• Each suggested_bullet MUST be 24-28 words - COUNT THEM
+• Keep \\textbf{{}} formatting for all numbers
+• Make the keyword integration sound natural, not forced
+• If a keyword genuinely cannot fit, note that in explanation
+
+Return ONLY the JSON array, no additional text or markdown."""
 
         response = await self.client.messages.create(
             model="claude-sonnet-4-20250514",
-            max_tokens=3000,
+            max_tokens=4000,
             messages=[{"role": "user", "content": prompt}]
         )
 
