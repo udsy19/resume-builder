@@ -291,7 +291,43 @@ class AIResumeTailorAsync:
     ) -> Dict:
         """ONE comprehensive API call with detailed prompting."""
 
-        prompt = f"""You are an ELITE ATS (Applicant Tracking System) resume optimization specialist. Your task is to perform EXHAUSTIVE keyword extraction and generate a PERFECTLY tailored resume in ONE response.
+        prompt = f"""You are an ELITE ATS (Applicant Tracking System) resume optimization specialist. Your task is to REPHRASE the candidate's EXISTING experiences with job-relevant keywords - NOT invent new ones.
+
+═══════════════════════════════════════════════════════════════════════════════
+                    ⚠️⚠️⚠️ CRITICAL: PRESERVE ORIGINAL EXPERIENCE ⚠️⚠️⚠️
+═══════════════════════════════════════════════════════════════════════════════
+
+YOU MUST PRESERVE THE CANDIDATE'S ACTUAL WORK HISTORY:
+
+✅ KEEP EXACTLY AS-IS (NEVER CHANGE):
+• Company names (e.g., "Google", "Amazon", "Startup XYZ")
+• Job titles (e.g., "Software Engineer", "Security Analyst")
+• Employment dates (e.g., "Jan 2022 - Present")
+• Project names (e.g., "Project Apollo", "Internal Tool")
+• Location information
+• The CORE ACHIEVEMENT described in each bullet (what they actually did)
+
+✅ YOU MAY ONLY REPHRASE:
+• The WORDING of bullet points to incorporate keywords from the job description
+• Add relevant technical terms that align with what they ACTUALLY did
+• Adjust metrics formatting (wrap in \\textbf{{}})
+
+❌ NEVER DO THIS:
+• Invent new companies or experiences
+• Change job titles to different roles
+• Add projects that don't exist in the original
+• Fabricate achievements or metrics that aren't implied by the original
+• Replace their actual work with generic/made-up content
+
+EXAMPLE OF CORRECT REPHRASING:
+Original: "Built a web scraper using Python"
+Rephrased: "Engineered automated Python-based web scraping solution using BeautifulSoup and Selenium, extracting \\textbf{{10,000+}} data points daily with \\textbf{{99\\%}} accuracy for business intelligence reporting"
+
+The rephrased version:
+• Keeps the SAME core work (Python web scraper)
+• Adds relevant keywords (BeautifulSoup, Selenium, automated, data points)
+• Adds reasonable metrics based on context
+• Does NOT change it to a completely different project
 
 ═══════════════════════════════════════════════════════════════════════════════
                               ORIGINAL RESUME
@@ -378,20 +414,32 @@ PRIORITY 3: SKILLS section (OVERFLOW ONLY - keywords that couldn't fit above)
 • Use EXACT phrases from job description
 • DO NOT bloat skills section - keep it compact (max 2-3 lines)
 
-⚡ RULE 5: PROTECTED SECTIONS (DO NOT MODIFY)
+⚡ RULE 5: PROTECTED SECTIONS AND EXPERIENCE INTEGRITY
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ⛔ EDUCATION section: Copy EXACTLY as-is from original
 ⛔ CERTIFICATIONS section: Copy EXACTLY as-is from original
 ⛔ Contact/Header info: Copy EXACTLY as-is from original
-✅ EXPERIENCE: Modify bullets to incorporate keywords
-✅ PROJECTS: Modify bullets to incorporate keywords
-✅ SKILLS: May add ONLY overflow keywords
+⛔ Company names: NEVER change (keep "Amazon", "Google", etc. exactly)
+⛔ Job titles: NEVER change (keep "Software Engineer", etc. exactly)
+⛔ Dates: NEVER change employment dates
+⛔ Project names: NEVER change project names
+✅ EXPERIENCE bullets: REPHRASE with keywords (keep same core achievement)
+✅ PROJECTS bullets: REPHRASE with keywords (keep same core project work)
+✅ SKILLS: Add keywords NOT used in Experience/Projects bullets
 
-⚡ RULE 6: ONE PAGE CONSTRAINT
+⚡ RULE 6: SKILLS SECTION HANDLING
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-• Maximum {max_exp} experiences
+After rephrasing Experience and Projects bullets:
+1. Identify which job keywords were NOT used in any bullet
+2. Add those unused keywords to the appropriate Skills subsection
+3. Match the original Skills section structure (e.g., Languages, Frameworks, Tools)
+4. Keep skills section compact - don't duplicate keywords already in bullets
+
+⚡ RULE 7: ONE PAGE CONSTRAINT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+• Maximum {max_exp} experiences (from the original resume, not invented)
 • Maximum {max_bullets} bullets per experience
-• Keep skills section COMPACT - do not add excessive skills
+• Keep skills section COMPACT - only add overflow keywords
 • MUST fit on ONE page - this is NON-NEGOTIABLE
 
 ═══════════════════════════════════════════════════════════════════════════════
@@ -408,17 +456,25 @@ PRIORITY 3: SKILLS section (OVERFLOW ONLY - keywords that couldn't fit above)
                          SELF-VERIFICATION CHECKLIST
 ═══════════════════════════════════════════════════════════════════════════════
 
-Before outputting, VERIFY for EACH bullet:
+⚠️ CRITICAL - VERIFY EXPERIENCE PRESERVATION:
+☐ All company names match EXACTLY from original resume
+☐ All job titles match EXACTLY from original resume
+☐ All employment dates match EXACTLY from original resume
+☐ All project names match EXACTLY from original resume
+☐ Each bullet describes the SAME core work as the original (just rephrased)
+☐ NO new/invented experiences or projects were added
+
+VERIFY for EACH bullet:
 ☐ Word count is 24-28 (count each word)
 ☐ Starts with strong action verb in past tense
 ☐ Contains \\textbf{{metric}}
 ☐ Verb not used more than 2x total
-☐ Keywords integrated naturally
+☐ Keywords integrated naturally into the EXISTING work description
 
 VERIFY overall:
 ☐ Education section UNCHANGED from original
 ☐ Certifications section UNCHANGED from original
-☐ Skills section is COMPACT (not bloated)
+☐ Skills section contains keywords NOT used in bullets
 ☐ Total content fits ONE page
 
 ═══════════════════════════════════════════════════════════════════════════════
