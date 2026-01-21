@@ -205,17 +205,70 @@ async def tailor_resume(request: TailorRequest):
 
 @app.post("/api/analyze-job")
 async def analyze_job(job_description: str = Form(...)):
-    """Analyze job description - now integrated into main tailor call."""
-    # This endpoint is deprecated - job analysis is now part of the main tailor call
-    # Return a simple response for backwards compatibility
-    return JSONResponse({
-        "message": "Job analysis is now integrated into the Generate Tailored Resume function for faster performance.",
-        "role_title": "",
-        "company": "",
-        "required_skills": [],
-        "preferred_skills": [],
-        "key_technologies": []
-    })
+    """Fast job analysis using Haiku for speed."""
+    try:
+        import anthropic
+
+        client = anthropic.AsyncAnthropic()
+
+        prompt = f"""Extract keywords from this job description for ATS optimization.
+
+JOB DESCRIPTION:
+{job_description}
+
+Return JSON with these exact keys:
+{{
+  "role_title": "the job title",
+  "company": "company name if mentioned",
+  "required_skills": ["skill1", "skill2", ...],
+  "preferred_skills": ["skill1", "skill2", ...],
+  "key_technologies": ["tech1", "tech2", ...],
+  "soft_skills": ["skill1", "skill2", ...],
+  "action_verbs": ["verb1", "verb2", ...],
+  "industry_terms": ["term1", "term2", ...],
+  "key_responsibilities": ["resp1", "resp2", ...],
+  "culture_keywords": ["keyword1", "keyword2", ...],
+  "must_include_phrases": ["phrase1", "phrase2", ...]
+}}
+
+Return ONLY the JSON, no markdown or explanation."""
+
+        response = await client.messages.create(
+            model="claude-haiku-4-20250514",
+            max_tokens=2000,
+            messages=[{"role": "user", "content": prompt}]
+        )
+
+        text = response.content[0].text
+        text = re.sub(r'```json\n?|```\n?', '', text).strip()
+
+        try:
+            analysis = json.loads(text)
+        except json.JSONDecodeError:
+            # Try to extract JSON
+            match = re.search(r'\{[\s\S]*\}', text)
+            if match:
+                analysis = json.loads(match.group())
+            else:
+                analysis = {}
+
+        return JSONResponse({
+            "role_title": analysis.get("role_title", ""),
+            "company": analysis.get("company", ""),
+            "required_skills": analysis.get("required_skills", []),
+            "preferred_skills": analysis.get("preferred_skills", []),
+            "key_technologies": analysis.get("key_technologies", []),
+            "soft_skills": analysis.get("soft_skills", []),
+            "action_verbs": analysis.get("action_verbs", []),
+            "industry_terms": analysis.get("industry_terms", []),
+            "key_responsibilities": analysis.get("key_responsibilities", []),
+            "culture_keywords": analysis.get("culture_keywords", []),
+            "must_include_phrases": analysis.get("must_include_phrases", [])
+        })
+
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/import-url")
