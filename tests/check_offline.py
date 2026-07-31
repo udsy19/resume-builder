@@ -255,6 +255,47 @@ def main():
         assert 'r.score == null ? "UNSCORED"' in app, "UI does not handle an unscored result"
     check("a failed evaluation still returns the resume", evaluation_failure_still_ships)
 
+    def cover_letter_template():
+        """The letter is judged on the page before it is read, so check the page."""
+        from src.latex import compile_local
+        tpl = (ROOT / "templates" / "cover-letter.tex").read_text()
+
+        # Placeholders must not overlap: NAME being a substring of SIGNATURE NAME
+        # corrupted the sign-off under any ordered replacement.
+        import re as _re
+        tokens = _re.findall(r"<<[A-Z_]+>>", tpl)
+        assert tokens, "template has no placeholders"
+        for a in tokens:
+            for b in tokens:
+                assert a == b or a not in b, f"placeholder {a} is a substring of {b}"
+
+        body = ("Rebuilt a detection pipeline around change events rather than a nightly "
+                "clock, cutting runtime from six hours to forty minutes.\n\n"
+                "Most detection problems are plumbing problems wearing a modelling costume.\n\n"
+                "I would like to bring that to your platform team.")
+        vals = {"<<FULL_NAME>>": "TEST CANDIDATE",
+                "<<CONTACT_LINE>>": r"Somewhere $\cdot$ you@example.com",
+                "<<DATE>>": "July 31, 2026",
+                "<<RECIPIENT_BLOCK>>": "Hiring Team",
+                "<<SALUTATION>>": "Dear Hiring Team,",
+                "<<BODY>>": body,
+                "<<CLOSING>>": "Sincerely,",
+                "<<SIGNATURE_NAME>>": "Test Candidate"}
+        out = tpl
+        for k, v in vals.items():
+            out = out.replace(k, v)
+        assert "<<" not in out, "a placeholder survived substitution"
+
+        r = compile_local(out)
+        assert r and r.ok, f"cover letter does not compile: {(r.error if r else 'no result')[:200]}"
+        assert r.pages == 1, f"cover letter is {r.pages} pages"
+        assert r.overfull_vboxes == 0, f"{r.overfull_vboxes} overfull box(es) — visible as bad spacing"
+
+        # The agent must refuse a letter with an unfilled placeholder.
+        agent_src = (ROOT / "src" / "agent.py").read_text()
+        assert '<<[A-Z_]+>>' in agent_src, "no guard against unfilled placeholders reaching the user"
+    check("cover letter compiles to one clean page", cover_letter_template)
+
     print()
     if failures:
         print(f"{len(failures)} FAILURE(S): {', '.join(failures)}")

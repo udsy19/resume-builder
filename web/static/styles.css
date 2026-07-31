@@ -813,3 +813,60 @@ details.advanced[open] summary { margin-bottom: 14px; }
 .gate-msg.good { color: var(--sky); }
 .gate-ok { display: flex; align-items: center; gap: 8px; opacity: 0.75; }
 .gate-ok .linklike { margin-left: auto; opacity: 0.6; }
+
+/* ── Cover letter opt-in ──
+   Sits outside the advanced panel, because it changes what you receive rather than
+   how it is made. */
+.opt-row {
+  display: flex;
+  gap: 11px;
+  align-items: flex-start;
+  padding: 0.85rem 1rem;
+  border: 1px solid color-mix(in srgb, var(--figure) 22%, transparent);
+  cursor: pointer;
+}
+.opt-row:hover { border-color: color-mix(in srgb, var(--figure) 45%, transparent); }
+.opt-row input[type="checkbox"] {
+  appearance: none;
+  width: 17px; height: 17px;
+  flex-shrink: 0;
+  margin-top: 2px;
+  border: 1px solid color-mix(in srgb, var(--figure) 55%, transparent);
+  background: transparent;
+  cursor: pointer;
+  display: grid;
+  place-content: center;
+}
+.opt-row input[type="checkbox"]:checked { background: var(--cobalt); border-color: var(--cobalt); }
+.opt-row input[type="checkbox"]:checked::after {
+  content: "";
+  width: 9px; height: 5px;
+  border: 2px solid var(--paper);
+  border-top: 0; border-right: 0;
+  transform: rotate(-45deg) translate(0.5px, -1px);
+}
+.opt-row input[type="checkbox"]:focus-visible { outline: 2px solid var(--cobalt); outline-offset: 2px; }
+.opt-copy { display: flex; flex-direction: column; gap: 3px; }
+.opt-copy strong { font-weight: 600; font-size: 0.92rem; }
+.opt-note { font-size: 0.8125rem; opacity: 0.7; line-height: 1.45; }
+
+/* ── Résumé / cover-letter switch ── */
+.doc-switch {
+  display: flex;
+  border-bottom: 1px solid color-mix(in srgb, var(--figure) 18%, transparent);
+}
+.doc-tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: inherit;
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 9px 14px;
+  cursor: pointer;
+  opacity: 0.5;
+}
+.doc-tab:hover { opacity: 0.85; }
+.doc-tab.on { opacity: 1; border-bottom-color: var(--accent); }

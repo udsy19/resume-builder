@@ -1149,6 +1149,99 @@ class ResumeAgent:
             },
         }
 
+
+    # ── Cover letter ─────────────────────────────────────────────────
+
+    async def cover_letter(self, *, dump, job_description, jd_analysis, resume_latex,
+                           template_latex: str, today: str):
+        """Write a cover letter for the same application, guaranteed to fit one page.
+
+        Generated after the resume is final so it can reinforce the same framing instead
+        of restating bullets. One page is enforced the same way it is for the resume —
+        by compiling and measuring, not by trusting a word count — because a letter that
+        spills three lines onto a second page is the one formatting error a reader
+        cannot miss.
+        """
+        yield {"step": "letter_writing", "phase": "generate",
+               "message": "Writing the cover letter...", "progress": 97}
+
+        prompt = prompts.COVER_LETTER_PROMPT.format(
+            template=template_latex,
+            job_description=job_description,
+            jd_analysis=json.dumps(jd_analysis, indent=2),
+            resume=resume_latex,
+            today=today,
+        )
+        msg = None
+        try:
+            async for ev in self._stream_call(
+                phase="generate", system=prompts.COVER_LETTER_SYSTEM,
+                messages=[{"role": "user", "content": dump.as_content_blocks(prompt)}],
+            ):
+                if ev["event"] == "message":
+                    msg = ev["message"]
+                else:
+                    yield {"step": "live", **ev}
+        except (ProviderError, AgentError) as e:
+            yield {"step": "letter_failed", "message": f"Cover letter skipped ({e})."}
+            return
+
+        letter = _extract_latex(_text_of(msg))
+
+        # An unfilled placeholder reaching a user would be the single most embarrassing
+        # possible output, so it is checked rather than hoped for.
+        leftover = re.findall(r"<<[A-Z_]+>>", letter)
+        if leftover:
+            yield {"step": "letter_failed",
+                   "message": f"Cover letter left {len(leftover)} placeholder(s) unfilled "
+                              f"({', '.join(sorted(set(leftover))[:3])}); not attaching it."}
+            return
+
+        compiled = await compile_pdf(letter)
+
+        # Overlong letters are common and mechanically fixable: measure the spill and ask
+        # for exactly that many words back, then verify rather than assume.
+        for _ in range(2):
+            if compiled.ok and compiled.pages == 1:
+                break
+            if not compiled.ok:
+                yield {"step": "letter_failed",
+                       "message": f"Cover letter did not compile ({compiled.error})."}
+                return
+            words = max(40, int(compiled.overflow_chars / 6) + 25)
+            yield {"step": "letter_tightening", "phase": "tighten",
+                   "message": f"Cover letter runs to {compiled.pages} pages — cutting about {words} words"}
+            trimmed = None
+            try:
+                async for ev in self._stream_call(
+                    phase="tighten", system=prompts.COVER_LETTER_SYSTEM,
+                    messages=[{"role": "user", "content": prompts.COVER_LETTER_TIGHTEN.format(
+                        words=words, latex=letter)}],
+                ):
+                    if ev["event"] == "message":
+                        trimmed = _extract_latex(_text_of(ev["message"]))
+                    else:
+                        yield {"step": "live", **ev}
+            except (ProviderError, AgentError):
+                break
+            if not trimmed:
+                break
+            verify = await compile_pdf(trimmed)
+            # Only accept a shorter letter that still builds.
+            if verify.ok and (verify.pages or 9) <= (compiled.pages or 9):
+                letter, compiled = trimmed, verify
+
+        if not compiled.ok or compiled.pages != 1:
+            yield {"step": "letter_failed",
+                   "message": "Cover letter would not fit one page; not attaching it."}
+            return
+
+        yield {"step": "letter_done",
+               "message": "Cover letter written — one page",
+               "progress": 99,
+               "data": {"pages": compiled.pages},
+               "letter": letter}
+
     # ── Chat editing ─────────────────────────────────────────────────
 
     async def edit(

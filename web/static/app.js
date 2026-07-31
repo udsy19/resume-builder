@@ -208,6 +208,15 @@ function renderDraft(desk, s) {
       </div>
     </details>
 
+    <label class="opt-row" for="f-cover">
+      <input type="checkbox" id="f-cover" ${s.coverLetter ? "checked" : ""}>
+      <span class="opt-copy">
+        <strong>Write a cover letter too</strong>
+        <span class="opt-note">One page, addressed to this posting, built from the same dossier.
+          Adds about a minute.</span>
+      </span>
+    </label>
+
     <button class="btn primary big" id="f-run">Build this resume</button>
     <p id="f-error" class="error" hidden></p>
 
@@ -219,6 +228,11 @@ function renderDraft(desk, s) {
   </div>`;
 
   // wire
+  $("f-cover").addEventListener("change", (e) => {
+    s.coverLetter = e.target.checked;
+    save();
+  });
+
   $("f-name").addEventListener("input", (e) => {
     const v = e.target.value.trim();
     s.nameSetByUser = !!v;
@@ -576,7 +590,12 @@ function renderDone(desk, s) {
             <button class="btn primary sm" id="d-pdf" title="Compiled via latex.ytotech.com — the resume content is sent there to build the PDF">Save PDF</button>
           </span>
         </div>
-        <div class="rev-strip" id="d-revs">${revStrip(s)}</div>
+        ${coverLetter(s) ? `
+        <div class="doc-switch" id="d-docs">
+          <button class="doc-tab ${s.doc !== "letter" ? "on" : ""}" data-doc="resume">Résumé</button>
+          <button class="doc-tab ${s.doc === "letter" ? "on" : ""}" data-doc="letter">Cover letter</button>
+        </div>` : ""}
+        <div class="rev-strip" id="d-revs" ${s.doc === "letter" ? "hidden" : ""}>${revStrip(s)}</div>
         <div id="d-preview" class="preview-box">
           <pre id="d-latex" class="latex-block" ${s.viewTab === "tex" ? "" : "hidden"}>${esc(currentLatex(s))}</pre>
           <div id="d-pdf-view" class="pdf-view" ${s.viewTab === "tex" ? "hidden" : ""}></div>
@@ -611,7 +630,15 @@ function renderDone(desk, s) {
     await navigator.clipboard.writeText(currentLatex(s));
     $("d-copy").textContent = "Copied!"; setTimeout(() => { const b = $("d-copy"); if (b) b.textContent = "Copy"; }, 1400);
   });
-    $("d-tex").addEventListener("click", () => download(s, "/api/export/tex", `resume-r${revIndex(s) + 1}.tex`, $("d-tex")));
+  if ($("d-docs")) {
+    $("d-docs").querySelectorAll(".doc-tab").forEach((b) => {
+      b.addEventListener("click", () => { s.doc = b.dataset.doc; save(true); renderAll(); });
+    });
+  }
+    $("d-tex").addEventListener("click", () => download(
+      s, "/api/export/tex",
+      s.doc === "letter" ? "cover-letter.tex" : `resume-r${revIndex(s) + 1}.tex`,
+      $("d-tex")));
   $("d-pdf").addEventListener("click", () => savePdf(s, $("d-pdf")));
   $("d-tab-pdf").addEventListener("click", () => { s.viewTab = "pdf"; save(); toggleTab(s); });
   $("d-tab-tex").addEventListener("click", () => { s.viewTab = "tex"; save(); toggleTab(s); });
@@ -640,7 +667,14 @@ function revIndex(s) {
   return s.viewRev == null || s.viewRev < 0 || s.viewRev >= n ? n - 1 : s.viewRev;
 }
 const latestLatex = (s) => (s.revisions?.length ? s.revisions[s.revisions.length - 1].latex : s.result.latex);
+function coverLetter(s) {
+  return s.result && s.result.cover_letter ? s.result.cover_letter : null;
+}
+
 function currentLatex(s) {
+  // The cover letter has no revision history — it is written once, so the revision
+  // strip applies to the resume only.
+  if (s.doc === "letter" && coverLetter(s)) return coverLetter(s);
   const i = revIndex(s);
   return i >= 0 ? s.revisions[i].latex : s.result.latex;
 }
@@ -687,6 +721,7 @@ async function startRun(s) {
   form.append("job_description", jd);
   form.append("aggressiveness", String(s.aggressiveness));
   form.append("template_id", s.templateId);
+  form.append("cover_letter", s.coverLetter ? "true" : "false");
   if (state.settings.apiKey) form.append("api_key", state.settings.apiKey);
   if (state.profile.kind === "file") {
     form.append("dump", b64ToFile(state.profile.fileB64, state.profile.filename, state.profile.fileType));
@@ -815,6 +850,16 @@ function handleRunUpdate(s, u) {
       break;
     case "craft_scored":
       pushLog(s, u.message);
+      break;
+    case "letter_writing":
+    case "letter_tightening":
+      pushLog(s, u.message);
+      break;
+    case "letter_done":
+      pushLog(s, u.message, "good");
+      break;
+    case "letter_failed":
+      pushLog(s, u.message, "error");
       break;
     case "evaluated": {
       const d = u.data;

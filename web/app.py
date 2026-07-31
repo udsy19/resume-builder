@@ -17,6 +17,7 @@ import tempfile
 import time
 import traceback
 from collections import defaultdict, deque
+from datetime import date
 from pathlib import Path
 from typing import List, Literal, Optional
 
@@ -32,7 +33,7 @@ from pydantic import BaseModel, Field
 from src.agent import AgentError, ResumeAgent
 from src.ingest import Dump, ingest_file
 from src.latex import DANGEROUS as _LATEX_DANGEROUS, compile_pdf, find_pdflatex
-from src.templates import get_template, list_templates, validate_custom_template
+from src.templates import TEMPLATES_DIR, get_template, list_templates, validate_custom_template
 
 app = FastAPI(title="ATS Resume Builder", version="4.0.0")
 
@@ -278,6 +279,7 @@ async def tailor_stream(
     dump: Optional[UploadFile] = File(None),
     custom_template: Optional[UploadFile] = File(None),
     api_key: str = Form(""),
+    cover_letter: bool = Form(False),
 ):
     """Run the agentic tailoring loop, streaming progress as SSE."""
     # Rate limiting happens in middleware, before routing — see rate_limit_middleware.
@@ -327,6 +329,7 @@ async def tailor_stream(
     async def events():
         try:
             agent = ResumeAgent(user_api_key=resolved_key)
+            final = None
             async for update in agent.run(
                 dump=the_dump,
                 job_description=job_description,
@@ -335,7 +338,30 @@ async def tailor_stream(
             ):
                 if await request.is_disconnected():
                     return  # stop burning tokens for a closed tab
+                if update.get("step") == "result" and cover_letter:
+                    # Held back so the letter can be attached to it: the UI treats the
+                    # result event as the end of the run, and a letter that arrived
+                    # afterwards would land on a screen that had already finished.
+                    final = update
+                    continue
                 yield _sse(update)
+
+            if final is not None:
+                letter = None
+                async for ev in agent.cover_letter(
+                    dump=the_dump,
+                    job_description=job_description,
+                    jd_analysis=final["result"].get("jd_analysis") or {},
+                    resume_latex=final["result"]["latex"],
+                    template_latex=(TEMPLATES_DIR / "cover-letter.tex").read_text(),
+                    today=date.today().strftime("%B %-d, %Y"),
+                ):
+                    if await request.is_disconnected():
+                        return
+                    letter = ev.pop("letter", None) or letter
+                    yield _sse(ev)
+                final["result"]["cover_letter"] = letter
+                yield _sse(final)
         except Exception as e:
             yield _sse({"step": "error", "message": _friendly_error(e)})
 

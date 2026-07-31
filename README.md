@@ -123,6 +123,20 @@ Full write-ups in [`research/`](research/).
 
 ---
 
+## Cover letters
+
+Tick the box on the setup screen and the run writes a matching cover letter after the
+resume is final, so it reinforces the same framing instead of restating bullets.
+
+It is a proper business letter, not a resume with paragraphs: ragged-right setting,
+paragraph spacing instead of indentation, and widow and orphan penalties maxed out. One
+page is enforced the way it is for the resume — by compiling and measuring, then asking
+for a specific number of words back if it spills. The same source-of-truth rule applies,
+and a letter that leaves a placeholder unfilled or will not fit is dropped rather than
+attached.
+
+---
+
 ## Truthfulness
 
 Your dump is the **sole source of facts.**

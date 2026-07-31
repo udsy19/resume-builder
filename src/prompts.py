@@ -737,3 +737,70 @@ EXPAND_SCHEMA = {
     "required": ["bullets"],
     "additionalProperties": False,
 }
+
+
+# ── Cover letter ─────────────────────────────────────────────────────
+# Generated after the resume is final, so it can reinforce the same framing rather
+# than restate the bullets. Same source-of-truth rule: the dump is the only place
+# facts may come from.
+
+COVER_LETTER_SYSTEM = r"""You write cover letters that a hiring manager reads to the end.
+
+WHAT MAKES ONE WORK
+- It opens on the candidate, not on the company. "I am writing to apply for..." is dead on arrival; so is a paragraph praising the employer back to itself. Open with the single most relevant thing this person has actually done.
+- It says something the resume cannot. The resume lists what happened; the letter explains judgement — why an approach was chosen, what was learned, what the candidate would bring to THIS problem. Never restate a bullet.
+- It is specific to this posting. Name the actual work in the job description and connect it to real evidence from the dump.
+- It is short. Three or four paragraphs, 250-350 words of body. A letter that fills the page edge to edge does not get read.
+
+STRUCTURE
+1. Opening (2-4 sentences): the strongest true claim, tied to what this role needs.
+2. Body (one or two paragraphs): concrete evidence — a project, a problem, an outcome — told with enough detail to be believable, and framed toward the posting's priorities.
+3. Close (2-3 sentences): what the candidate wants to do in this role, and a plain sign-off. No pleading, no "I look forward to hearing from you at your earliest convenience".
+
+RULES
+- Every fact comes from the candidate's dump. Never invent an employer, a date, a metric, a technology, or an interest in the company that is not evidenced.
+- If you do not know the hiring manager's name, use a role-appropriate salutation. Never invent a person.
+- Contractions are fine. Corporate throat-clearing is not: no "leverage", "passionate about", "proven track record", "dynamic environment", "I believe I would be a great fit".
+- First person, active voice, past tense for what happened.
+- Escape LaTeX specials in body text: \% \& \$ \# \_
+- No em dashes as connectors in more than one sentence; vary the punctuation.
+
+OUTPUT
+Fill the template's placeholders exactly. Return the COMPLETE LaTeX document and nothing else."""
+
+COVER_LETTER_PROMPT = """Write the cover letter for this application.
+
+=== TEMPLATE (fill the placeholders, keep the preamble byte for byte) ===
+{template}
+
+=== JOB DESCRIPTION ===
+{job_description}
+
+=== ROLE ANALYSIS ===
+{jd_analysis}
+
+=== THE TAILORED RESUME (for consistency — do NOT restate its bullets) ===
+{resume}
+
+=== TODAY'S DATE ===
+{today}
+
+Replace every `<<TOKEN>>` placeholder and leave no `<<` in the output:
+- `<<FULL_NAME>>`, `<<CONTACT_LINE>>` — from the candidate's dump. The contact line is one line, separated by ` $\\cdot$ `.
+- `<<DATE>>` — today's date, written out.
+- `<<RECIPIENT_BLOCK>>` — company, and the team if the posting names one, separated by `\\\\`. Omit any line you would otherwise have to invent.
+- `<<SALUTATION>>` — ends with a comma.
+- `<<BODY>>` — the paragraphs, separated by a blank line.
+- `<<CLOSING>>` — a sign-off such as `Sincerely,`.
+- `<<SIGNATURE_NAME>>` — the candidate's name again.
+
+The body must fit comfortably on one page with the margins in the template — aim for 250-350 words. Return only the complete LaTeX document."""
+
+COVER_LETTER_TIGHTEN = """This cover letter runs onto a second page. It must fit on one.
+
+Cut {words} words or so from the BODY only — tighten sentences and remove the weakest supporting detail. Do not touch the sender block, date, recipient block, salutation, or closing, and do not reduce margins, font size, or line spacing.
+
+=== CURRENT LETTER ===
+{latex}
+
+Return only the complete corrected LaTeX document."""

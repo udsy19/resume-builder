@@ -1,0 +1,58 @@
+% Cover letter — a proper business letter, not a resume with paragraphs.
+%
+% Typography choices that matter, because a letter is judged on the page before it is
+% read: ragged-right setting (justified text in a narrow measure opens rivers of white
+% space), no paragraph indentation with clear space between paragraphs instead, and
+% generous margins so a short letter does not look stranded. Widow and orphan penalties
+% are set high — a single line of a paragraph alone at a page break is the most visible
+% defect a one-page letter can have.
+\documentclass[11pt,letterpaper]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[left=1.1in,right=1.1in,top=1.0in,bottom=1.0in]{geometry}
+\usepackage{charter}
+\usepackage{microtype}
+\usepackage[hidelinks]{hyperref}
+\usepackage{parskip}
+\usepackage{ragged2e}
+
+\pagestyle{empty}
+\setlength{\parskip}{0.85em}
+\setlength{\parindent}{0pt}
+
+% A line alone at the foot or head of a block is the defect a reader notices first.
+\widowpenalty=10000
+\clubpenalty=10000
+
+\linespread{1.04}
+\RaggedRight
+\hyphenpenalty=800
+
+\begin{document}
+
+%% SENDER — name, then contact on one line.
+{\large\bfseries <<FULL_NAME>>}\\[0.15em]
+<<CONTACT_LINE>>
+
+\vspace{1.4em}
+
+<<DATE>>
+
+\vspace{1.0em}
+
+%% RECIPIENT — omit any line that is genuinely unknown rather than inventing it.
+<<RECIPIENT_BLOCK>>
+
+\vspace{1.0em}
+
+<<SALUTATION>>
+
+<<BODY>>
+
+\vspace{0.6em}
+
+<<CLOSING>>\\[1.6em]
+<<SIGNATURE_NAME>>
+
+\end{document}
