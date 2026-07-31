@@ -34,9 +34,14 @@ log "Service user"
 id -u resume >/dev/null 2>&1 || useradd --system --create-home --shell /usr/sbin/nologin resume
 
 log "Application"
+# The tree is chowned to the service user, so git refuses to operate on it as root
+# without this. Left unset, a re-run silently keeps the OLD code, restarts cleanly and
+# reports healthy — the deploy looks fine and nothing has changed.
+git config --global --add safe.directory "$APP_DIR" 2>/dev/null || true
+
 if [ -d "$APP_DIR/.git" ]; then
-    git -C "$APP_DIR" fetch --quiet origin main
-    git -C "$APP_DIR" reset --hard --quiet origin/main
+    git -C "$APP_DIR" fetch origin main
+    git -C "$APP_DIR" reset --hard origin/main
 else
     git clone --quiet "$REPO" "$APP_DIR"
 fi
@@ -71,6 +76,9 @@ ENV
 else
     echo "  $ENV_FILE already exists, left untouched"
 fi
+
+# Prove the checkout is what we asked for before building anything on top of it.
+echo "  now at $(git -C "$APP_DIR" log --oneline -1)"
 
 log "Verifying the LaTeX toolchain"
 sudo -u resume "$APP_DIR/.venv/bin/python" "$APP_DIR/tests/check_offline.py" \
