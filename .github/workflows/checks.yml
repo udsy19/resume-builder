@@ -37,3 +37,6 @@ jobs:
 
       - name: Web layer checks
         run: python3 tests/check_web.py
+
+      - name: Stress checks
+        run: python3 tests/stress.py

@@ -305,7 +305,8 @@ def main():
         import re as _re
         bad = []
         for f in list(ROOT.glob("*.py")) + list(ROOT.glob("*/*.py")) + list(ROOT.glob("*/*.sh")):
-            if ".venv" in str(f):
+            # Skip this file: it necessarily contains the pattern it searches for.
+            if ".venv" in str(f) or f.name == "check_offline.py":
                 continue
             for n, line in enumerate(f.read_text().splitlines(), 1):
                 if line.lstrip().startswith("#"):

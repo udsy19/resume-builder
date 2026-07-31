@@ -6,6 +6,7 @@ a job description, an optional LaTeX template choice, and an aggressiveness
 level. Output: a recursively evaluated, ATS-optimized one-page LaTeX resume.
 """
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -269,6 +270,47 @@ def _sse(payload: dict) -> str:
     return f"data: {json.dumps(payload)}\n\n"
 
 
+# A run goes quiet for long stretches — generation reasons for well over a minute before
+# emitting anything. Any idle timeout between the browser and this process (proxy, load
+# balancer, or the browser itself) will drop a silent connection, and the page reports it
+# as "network error" with no trace on the server, because the server did nothing wrong.
+# A comment line every few seconds keeps the connection provably alive and costs nothing:
+# SSE clients ignore lines beginning with a colon.
+SSE_HEARTBEAT_SECONDS = 15
+
+
+async def _keepalive(source):
+    """Yield the source's events, injecting a heartbeat whenever it falls silent."""
+    queue: asyncio.Queue = asyncio.Queue()
+    DONE = object()
+
+    async def pump():
+        try:
+            async for item in source:
+                await queue.put(item)
+        except Exception as e:                       # surface, don't strand the client
+            await queue.put(e)
+        finally:
+            await queue.put(DONE)
+
+    task = asyncio.create_task(pump())
+    try:
+        while True:
+            try:
+                item = await asyncio.wait_for(queue.get(), timeout=SSE_HEARTBEAT_SECONDS)
+            except asyncio.TimeoutError:
+                yield ": keepalive\n\n"
+                continue
+            if item is DONE:
+                return
+            if isinstance(item, Exception):
+                raise item
+            yield item
+    finally:
+        if not task.done():
+            task.cancel()
+
+
 @app.post("/api/tailor/stream")
 async def tailor_stream(
     request: Request,
@@ -366,7 +408,7 @@ async def tailor_stream(
             yield _sse({"step": "error", "message": _friendly_error(e)})
 
     return StreamingResponse(
-        events(),
+        _keepalive(events()),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
     )
@@ -398,7 +440,7 @@ async def edit_stream(request: Request, edit: EditRequest):
             yield _sse({"step": "error", "message": _friendly_error(e)})
 
     return StreamingResponse(
-        events(),
+        _keepalive(events()),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
     )
