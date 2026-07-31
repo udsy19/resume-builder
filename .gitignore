@@ -55,3 +55,8 @@ output/*.pdf
 *.log
 *.aux
 *.out
+
+# Generated test artifacts (regenerable; keep BENCHMARK.md and judge_noise.json)
+tests/results/*.tex
+tests/results/*.json
+!tests/results/judge_noise.json
