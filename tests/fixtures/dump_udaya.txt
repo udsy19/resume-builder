@@ -1,0 +1,61 @@
+UDAYA VIJAY ANAND
+West Lafayette, IN | +1 (555) 010-0199 | you@example.com
+linkedin.com/in/udaya-vijay-anand | udsy.in | github.com/udsy19
+
+EDUCATION
+Purdue University - Main Campus, West Lafayette, IN
+B.Sc. in Cybersecurity and Computing Infrastructure and Network Engineering, May 2026
+Minor: Finance. GPA: 3.55
+Certifications: Security+ (CompTIA), CSAP (CompTIA), CySA+ (CompTIA), CEH (EC-Council). Dean's List (2022-2023).
+
+Columbia University, New York, NY
+M.S. in Quantum Science and Technology, expected May 2028. Focus: Post-Quantum Cryptography and Quantum Security.
+
+EXPERIENCE
+KPMG — Bengaluru, India. Cyber Defence & Incident Response (CDIR) Intern. Jun 2025 - Aug 2025
+- Engineered and led a hackathon-to-production deployment pipeline deploying Docker containerization, CI/CD automation, Prometheus monitoring stack, and observability with structured logging, attaining under 1000ms P95 response times.
+- Performed incident response triage and malware analysis across phishing and Windows exploitation scenarios, integrating SIEM detection rules mapped to MITRE ATT&CK improving detection coverage by 30%.
+- Architected asynchronous middleware processing 25-40 TPS with distributed caching, Redis session management, and Kubernetes-orchestrated horizontal scaling supporting 20+ concurrent WebSocket connections.
+- Developed cross-platform AI Safety Guardrails middleware leveraging React TypeScript, FastAPI microservices, and Electron containerization with multi-provider LLM orchestration across 5 APIs.
+
+Purdue University — West Lafayette, IN. Teaching Assistant, CNIT 176 & 271 (IT Architecture & Cybersecurity Fundamentals II). Jan 2024 - Aug 2025
+- Facilitated hands-on laboratory sessions for 75 students, developing custom network simulation exercises and distributed systems configurations on traffic analysis, system hardening, and vulnerability assessment.
+- Redesigned evaluation frameworks for technical assignments across 22 students, creating detailed rubrics and personalized feedback improving average grades by 15%.
+- Collaborated with instructors to design materials for hardware security implementation and system hardening techniques.
+
+DBS Bank — Mumbai, India. Cybersecurity Intern. May 2024 - Aug 2024
+- Led POC implementation of Rapid7 InsightVM and Insight Agent for authenticated scans, streamlining manual vulnerability assessment to meet RBI regulations and increased detection speed by 25%.
+- Developed a program utilizing Openpyxl and Pandas to optimize generation of RBI-compliant reports, eliminating manual intervention and increasing efficiency by 50% with parallelized tasks using ThreadPool.
+- Engineered a scalable Python scraper to autonomously extract data from 70k+ webpages, parsing NCIIPC-published vulnerabilities and CVE details. Incorporated anti-crawler techniques to preserve data integrity across multiple IPs.
+- Conducted monthly WiFi and Web Application security assessments using BurpSuite, Nikto, and Wireshark, aligning with OWASP Top 10 standards.
+
+PROJECTS
+Phantom | Autonomous Black-Box Penetration Testing Platform | Y Combinator Hackathon Winner - Best DevTool
+- Designed an autonomous black-box penetration testing platform on LangGraph and Docker in a 36-hour build, coordinating recon, exploitation and reporting agents across web, API and network attack surfaces with AI-generated remediation reports.
+- Chained 5+ agent layers for adaptive enumeration, exploit execution, and reporting.
+
+Advanced Cloud Security Reconnaissance Platform (CloudBucket_Pentest) | Agentic AI-Powered Accelerated Pentesting
+- Architected enterprise-grade security framework with 11 discovery methods including Certificate Transparency and passive DNS, processing 4+ million subdomains while designing comprehensive Azure Storage / S3 bucket assessment system.
+- Built scalable architecture executing 52+ attack scenarios covering authentication bypass, misconfigured cloud storage, and privilege escalation, integrating local Foundation-Sec-8B model with intelligent failover ensuring data privacy and air-gapped operation.
+
+PrivacyLens | Automated Confidential Data Scanner for Enterprise Assets (KPMG)
+- Built automated Python pipeline processing 100,000 company files across documents, scripts and spreadsheets, integrating adaptive keyword mapping and on-premises language models across 25+ file formats.
+- Established enterprise-grade compliance with high-fidelity PII detection and dynamic severity classification, generating 300+ actionable PDF and CSV reports for GRC audits.
+
+Know (useknow.io) | Professional Network Intelligence Platform | Co-Founder & CTO
+- Architected the full technical stack for a network intelligence SaaS end to end, engineering a privacy-aware enrichment pipeline with rate-limiting, anti-crawler evasion, and multi-source deduplication across 500+ professional network nodes.
+
+Instagram Bug Bounty Security Research
+- Discovered a platform-level account-access vulnerability affecting a large user subset; architected a cloud-orchestrated research pipeline performing large-scale ethical sensor testing across millions of page interactions.
+- Generated triage artifacts including PoC summaries and remediation timelines, coordinating with vendor security teams, reducing investigation time by 60%.
+
+Cybersecurity Home Lab
+- Architected a lab with VLAN-segmented networking, Synology DS220+ NAS, and multi-VM corporate infrastructure simulating red team attacks using Metasploit and ransomware scenarios.
+- Implemented blue team monitoring with Security Onion, ELK Stack, and Wazuh SIEM, integrating an Ollama LLM server for AI-assisted threat intelligence mapped to MITRE ATT&CK.
+
+SKILLS
+Security: Incident Response (DFIR), Threat Hunting, SIEM (Elastic, Wazuh, Security Onion), EDR, SOC Analysis, Malware Analysis, MITRE ATT&CK, OWASP Top 10, Secure SDLC, AppSec
+Cloud & Infrastructure: AWS, Azure, IAM/RBAC, VPC, S3/Blob Security, Kubernetes, Docker, Virtualization (VMware, Proxmox), GitHub Actions, Prometheus, Grafana
+Networking: TCP/IP, OSPF, VLANs, VPN & IPSec, DNS, DHCP, Load Balancing, Firewalls (pfSense, Juniper, Cisco ASA)
+Programming: Python, C++, Java, SQL, FastAPI, REST APIs, LangGraph, Web Automation, Data Processing (Pandas, NumPy)
+Tools: Rapid7, Burp Suite, Nmap, Metasploit, Sysmon, Suricata, Wazuh, ELK Stack, Jupyter, Redis

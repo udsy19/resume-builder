@@ -1,0 +1,259 @@
+%-------------------------
+% Resume in Latex, interpolated from Jake's Resume:
+% https://www.overleaf.com/latex/templates/jakes-resume/syzfjbzwjncs
+% Author : Matthew Dominicis
+
+% RESUME FAQ -- Read this please!!!:
+% Q: How to write months?
+% A: Jan., Feb., March, April, May, June, July, Aug., Sept., Oct., Nov., Dec.
+
+% Q: How to write State?
+% A: Missouri should be written as MO
+    
+% Q: What should I write for my job title?
+% A: Try to be specific, instead of just saying intern or member, write the department, or what your main job was
+
+% Q: My links are too long!
+% A: You can shorten your linkedin URL by going to https://www.linkedin.com/public-profile/settings and editing your URL in the top right under "Edit your custom URL"
+
+% Q: Should I ever have a resume longer than 1 page?
+% A: No, only exception is if you have a Masters or PhD and need to list your publication, but then that'd be a C.V. and not a resume
+
+% Q: Can I use a font other than Times New Roman?
+% A: The more your font stands out the worse it probably looks to a recruiter, don't be concerned about blending in, that's not an issue. It's about making a readable resume and letting your experience do the talking!
+
+% Q: Should I add a summary/brief intro at the top of my resume
+% A: You shouldn't, it's generic and most recruiters will skip right over it
+
+% Q: Should I submit a cover letter?
+% A: Not unless required, they probably won't read it
+
+% Q: Headshot of myself on my resume?
+% A: No, recruiters can unconsciously discriminate
+
+% Q: How long should I keep high school experience/irrelevant experience on my resume?
+% A: Replace it as soon as you can, if you can't currently replace it, join a design team and get involved ASAP!
+
+% Q: Should I include where I live in the top line along with my phone number etc.
+% A: No, may make recruiter throw your resume if they think you're too far from the place even if you would be willing to relocate
+
+% Q: My course isn't exactly titled "Data Structures and Algorithms" etc.
+% A: No need to put introduction to... in front of the course name, if its a really long name only put the important words etc.
+
+% Q: How should I organize my experience?
+% A: Chronologically - most recent at the top
+
+% Q: What courses should I put?
+% A: If you've taken it in the past or are currently enrolled in it, you can put it
+%------------------------
+
+\documentclass[letterpaper,11pt]{article}
+
+\usepackage{latexsym}
+\usepackage[empty]{fullpage}
+\usepackage{titlesec}
+\usepackage{marvosym}
+\usepackage[usenames,dvipsnames]{color}
+\usepackage{verbatim}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+\usepackage{fancyhdr}
+\usepackage[english]{babel}
+\usepackage{tabularx}
+\usepackage{multicol}
+\input{glyphtounicode}
+
+\pagestyle{fancy}
+\fancyhf{} % clear all header and footer fields
+\fancyfoot{}
+\renewcommand{\headrulewidth}{0pt}
+\renewcommand{\footrulewidth}{0pt}
+
+% Adjust margins
+\addtolength{\oddsidemargin}{-0.5in}
+\addtolength{\evensidemargin}{-0.5in}
+\addtolength{\textwidth}{1in}
+\addtolength{\topmargin}{-.5in}
+\addtolength{\textheight}{1.0in}
+
+\urlstyle{same}
+
+\raggedbottom
+\raggedright
+\setlength{\tabcolsep}{0in}
+
+% Sections formatting
+\titleformat{\section}{
+  \vspace{-4pt}\scshape\raggedright\large
+}{}{0em}{}[\color{black}\titlerule \vspace{-5pt}]
+
+% Ensure that generate pdf is machine readable/ATS parsable
+\pdfgentounicode=1
+
+%-------------------------
+% Custom commands
+\newcommand{\resumeItem}[1]{
+  \item\small{
+    {#1 \vspace{-2pt}}
+  }
+}
+
+\newcommand{\resumeSubheading}[4]{
+  \vspace{-2pt}\item
+    \begin{tabular*}{0.97\textwidth}[t]{l@{\extracolsep{\fill}}r}
+      \textbf{#1} & #2 \\
+      \textit{\small#3} & \textit{\small #4} \\
+    \end{tabular*}\vspace{-7pt}
+}
+
+\newcommand{\resumeSubSubheading}[2]{
+    \item
+    \begin{tabular*}{0.97\textwidth}{l@{\extracolsep{\fill}}r}
+      \textit{\small#1} & \textit{\small #2} \\
+    \end{tabular*}\vspace{-7pt}
+}
+
+\newcommand{\resumeProjectHeading}[2]{
+    \item
+    \begin{tabular*}{0.97\textwidth}{l@{\extracolsep{\fill}}r}
+      \small#1 & #2 \\
+    \end{tabular*}\vspace{-7pt}
+}
+
+\newcommand{\resumeSubItem}[1]{\resumeItem{#1}\vspace{-4pt}}
+
+\renewcommand\labelitemii{$\vcenter{\hbox{\tiny$\bullet$}}$}
+
+\newcommand{\resumeSubHeadingListStart}{\begin{itemize}[leftmargin=0.15in, label={}]}
+\newcommand{\resumeSubHeadingListEnd}{\end{itemize}}
+\newcommand{\resumeItemListStart}{\begin{itemize}}
+\newcommand{\resumeItemListEnd}{\end{itemize}\vspace{-5pt}}
+
+%-------------------------------------------
+%%%%%%  RESUME STARTS HERE  %%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{document}
+
+%----------HEADING----------
+\begin{center}
+    \textbf{\large \scshape FirstName LastName} \\ \vspace{1pt}
+    \small 123-456-7890 $|$ \href{mailto:name@gmail.com}{\underline{name@gmail.com}} $|$ 
+    \href{https://linkedin.com/in/link}{\underline{linkedin.com/in/link}} $|$
+    \href{https://github.com/link}{\underline{github.com/link}}
+\end{center}
+
+%-----------EDUCATION-----------
+\section{Education}
+  \resumeSubHeadingListStart
+    \resumeSubheading
+      {Missouri University of Science and Technology}{GraduatingMonth GraduatingYear}
+      {Bachelor of Science in Computer Science, Minor in Mathematics}{GPA: 4.0/4.0}
+        \item{Courses:}\vspace{-12pt}
+        \begin{multicols}{3}
+        \begin{itemize}[leftmargin=0.15in, label={}]
+            \small
+              \item -  Course Title
+              \item -  Data Structures and Algorithms
+              \item -  
+%DELETE THESE 3 ITEMS TO REDUCE COURSES BY A ROW
+              \item -  
+              \item -  
+              \item - 
+%DELETE THESE 3 ITEMS TO REDUCE COURSES BY A ROW
+              \item - 
+              \item - 
+              \item -  
+         \end{itemize}
+         \end{multicols}
+  \resumeSubHeadingListEnd
+
+%-----------EXPERIENCE-----------
+\section{Experience}
+  \resumeSubHeadingListStart
+    \resumeSubheading
+      {Job Title}{Jan. 2000 -- Present}
+      {Company}{City, State}
+      \resumeItemListStart
+        \resumeItem{description of job task...}
+        \resumeItem{}
+        \resumeItem{}
+        \resumeItem{}
+        \resumeItem{}
+        \resumeItem{}
+        \resumeItem{}
+        \resumeItem{}
+      \resumeItemListEnd
+    \resumeSubheading
+      {Supply Chain Intern}{May 2023 -- April 2024}
+      {World Wide Technology}{St. Louis, MO}
+      \resumeItemListStart
+        \resumeItem{Developed an internal data entry tool using Retool to build a database allowing for the easy management and tracking of over \$10 million dollars in contracts}
+        \resumeItem{Hosted and managed version control of database using GCP Compute Engine}
+        \resumeItem{Engineered queries for both data entry and retrieval using SQL}
+      \resumeItemListEnd
+      
+  \resumeSubHeadingListEnd
+
+%-----------PROJECTS/RESEARCH EXPERIENCE-----------
+\section{Projects}
+  \resumeSubHeadingListStart    
+    \resumeSubheading
+      {Title of Project}{Jan. 2000 -- Present}
+      {Very Brief Description of what project was for}{City, State}
+      \resumeItemListStart
+        \resumeItem{description of job task... try to include frameworks used, programming languages, small details, etc.}
+        \resumeItem{}
+        \resumeItem{}
+    \resumeItemListEnd
+    \resumeSubheading
+      {Inserting T Gates in a Quantum Circuit to Achieve Randomness}{April 2023 -- April 2024}
+      {Theory and Quantum Information Science Lab, Advised by Dr. John Doe}{Rolla, MO}
+      \resumeItemListStart
+        \resumeItem{Investigated impact of inserting T gates on randomness of Clifford circuits for unitary creation}
+        \resumeItem{Conducted experiments on random Clifford circuit generation techniques, attempting to minimize number of gates needed for maximized Entanglement Entropy to $O(\log{}n)$ depth}
+    \resumeItemListEnd
+
+  \resumeSubHeadingListEnd
+% -----------ALTERNATE PROJECTS SECTION REMOVE COMMENT BY DOING CTRL + / -----------
+% \section{Projects}
+%     \resumeSubHeadingListStart
+%       \resumeProjectHeading
+%           {\textbf{Gitlytics} $|$ \emph{Python, Flask, React, PostgreSQL, Docker}}{June 2020 -- Present}
+%           \resumeItemListStart
+%             \resumeItem{Developed a full-stack web application using with Flask serving a REST API with React as the frontend}
+%             \resumeItem{Implemented GitHub OAuth to get data from user’s repositories}
+%             \resumeItem{Visualized GitHub data to show collaboration}
+%             \resumeItem{Used Celery and Redis for asynchronous tasks}
+%           \resumeItemListEnd
+%       \resumeProjectHeading
+%           {\textbf{Simple Paintball} $|$ \emph{Spigot API, Java, Maven, TravisCI, Git}}{May 2018 -- May 2020}
+%           \resumeItemListStart
+%             \resumeItem{Developed a Minecraft server plugin to entertain kids during free time for a previous job}
+%             \resumeItem{Published plugin to websites gaining 2K+ downloads and an average 4.5/5-star review}
+%             \resumeItem{Implemented continuous delivery using TravisCI to build the plugin upon new a release}
+%             \resumeItem{Collaborated with Minecraft server administrators to suggest features and get feedback about the plugin}
+%           \resumeItemListEnd
+%     \resumeSubHeadingListEnd
+
+%-----------ACTIVITIES AND HONORS---------
+\section{Activities and Honors}
+    \resumeItemListStart
+        \resumeItem{Delete Section if you don't have any internships yet and are putting activities in experience section}
+        \resumeItem{IEEE - Eta Kappa Nu Honors Society, Student Council Representative and Events Planning Committee Member}
+        \resumeItem{}
+        \resumeItem{}
+        \resumeItem{}
+        \resumeItem{Dean’s List 2022-2025, Bright Flight Scholar, Missouri SandT Scholar... other honors}
+    \resumeItemListEnd
+
+%-----------PROGRAMMING SKILLS-----------
+\section{Technical Skills}
+ \begin{itemize}[leftmargin=0.15in, label={}]
+    \small{\item{
+     \textbf{Languages}{: Python, C++, C, ASM, SQL, HTML, CSS} \\
+     \textbf{Developer Tools}{: Git, Github, Docker, GCP, AWS, VS Code, Visual Studio, PowerBI, MySQL} \\
+     \textbf{Libraries}{: Delete line if not applicable, NumPy, Matplotlib, Qiskit}
+    }}
+ \end{itemize}
+%-------------------------------------------
+\end{document}

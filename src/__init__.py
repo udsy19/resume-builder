@@ -1,27 +1,7 @@
 """
-ATS-Optimized Resume Builder
+ATS Resume Builder — agentic resume tailoring on the Anthropic SDK.
 
-A tool that takes a LaTeX resume and job description, then outputs
-a tailored one-page resume with maximum ATS keyword match.
+One input (the candidate's information dump), a job description, a LaTeX
+template, and an aggressiveness level in; a recursively evaluated, ATS-
+optimized one-page LaTeX resume out.
 """
-
-from .extractor import extract_keywords, KeywordProfile, JobDescriptionExtractor
-from .analyzer import analyze_resume, ParsedResume, LaTeXResumeAnalyzer
-from .matcher import match_resume_to_job, ContentMatcher, MatchResult
-from .generator import generate_tailored_resume, ResumeGenerator, MatchReportGenerator
-
-__version__ = "1.0.0"
-__all__ = [
-    "extract_keywords",
-    "analyze_resume",
-    "match_resume_to_job",
-    "generate_tailored_resume",
-    "KeywordProfile",
-    "ParsedResume",
-    "MatchResult",
-    "JobDescriptionExtractor",
-    "LaTeXResumeAnalyzer",
-    "ContentMatcher",
-    "ResumeGenerator",
-    "MatchReportGenerator",
-]

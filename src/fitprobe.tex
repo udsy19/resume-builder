@@ -1,0 +1,15 @@
+% Non-invasive fit probe. Injected BEFORE \documentclass via the pdflatex command line,
+% so the user's template is never edited. Reports TeX's page arithmetic to the log:
+%   headroom = textheight + pageshrink - pagetotal
+% Linear and unsaturated, unlike PDF ink coverage which pins at ~99% whether the page has
+% four bullets of slack or none.
+%
+% Deliberately does NOT wrap \resumeItem: templates define it with either one argument
+% (jakes, udaya, mst) or two (sb2nov), and a fixed-arity wrapper silently mangles the
+% two-argument form.
+\AtEndDocument{%
+  \typeout{FITSUM lastpagetotal=\the\pagetotal}%
+  \typeout{FITSUM lastpagegoal=\the\pagegoal}%
+  \typeout{FITSUM lastpageshrink=\the\pageshrink}%
+  \typeout{FITSUM textheight=\the\textheight}%
+}

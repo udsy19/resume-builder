@@ -1,0 +1,19 @@
+Backend Engineer, Platform — Ramp (New York)
+
+You will build and own the services that move money. This is a backend role: you will write
+Python and Go every day, design APIs other teams depend on, and be responsible for the
+reliability of what you ship.
+
+What you'll do
+- Design and build REST APIs and event-driven services in Python and Go
+- Own database schema design and query performance on PostgreSQL
+- Build async processing pipelines with Redis and Kafka
+- Instrument services with Prometheus and Grafana; own SLOs and on-call for your surface
+- Containerize with Docker and deploy on Kubernetes through CI/CD
+- Write unit and integration tests; participate in code review
+
+What we look for
+- Strong CS fundamentals: data structures, concurrency, distributed systems
+- Experience with FastAPI or similar; REST API design
+- Comfort with observability, caching, and horizontal scaling
+- Bonus: security-minded engineering, authentication and authorization systems

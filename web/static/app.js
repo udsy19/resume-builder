@@ -1,922 +1,1120 @@
-// ATS Resume Builder - AI Powered Frontend v3.0 with Streaming
+/* Resume Builder — multi-role tailoring desk.
+   Sessions persist in localStorage; each role runs its own live agent stream. */
 
-// Global state
-let currentLatex = '';
-let originalLatex = '';
-let currentValidation = null;
-let checkedKeywords = new Set();
+"use strict";
 
-document.addEventListener('DOMContentLoaded', () => {
-    checkAIStatus();
-    setupTabs();
-    setupFileUploads();
-    setupButtons();
-    setupOutputTabs();
-    setupModal();
-    setupKeywordChecklist();
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+/* ══ State & persistence ═══════════════════════════════════════════ */
+
+const LS = { sessions: "rb.sessions", profile: "rb.profile", settings: "rb.settings", active: "rb.active" };
+
+const state = {
+  sessions: [],           // persisted role sessions
+  profile: null,          // { kind: 'file'|'text', filename, text?, fileB64?, fileType? }
+  settings: { apiKey: "" },
+  activeId: null,
+  templates: [],          // fetched once
+  runs: new Map(),        // sessionId -> { controller }
+  unloading: false,       // page is being torn down — don't mark dying fetches as errors
+};
+
+window.addEventListener("pagehide", () => { state.unloading = true; });
+
+function loadState() {
+  try { state.sessions = JSON.parse(localStorage.getItem(LS.sessions)) || []; } catch { state.sessions = []; }
+  try { state.profile = JSON.parse(localStorage.getItem(LS.profile)); } catch { state.profile = null; }
+  try { state.settings = JSON.parse(localStorage.getItem(LS.settings)) || { apiKey: "" }; } catch { state.settings = { apiKey: "" }; }
+  state.activeId = localStorage.getItem(LS.active);
+  // A run can't survive a page reload — mark any as interrupted.
+  state.sessions.forEach((s) => { if (s.status === "running") { s.status = "interrupted"; } });
+  if (!state.sessions.length) state.sessions.push(newSession());
+  if (!state.sessions.some((s) => s.id === state.activeId)) state.activeId = state.sessions[0].id;
+}
+
+let saveTimer = null;
+function save(immediate = false) {
+  clearTimeout(saveTimer);
+  const doSave = () => {
+    try {
+      localStorage.setItem(LS.sessions, JSON.stringify(state.sessions));
+      localStorage.setItem(LS.active, state.activeId ?? "");
+    } catch { /* quota — drop oldest results */
+      trimForQuota();
+    }
+  };
+  if (immediate) doSave(); else saveTimer = setTimeout(doSave, 600);
+}
+function saveProfile() {
+  try { localStorage.setItem(LS.profile, JSON.stringify(state.profile)); }
+  catch { alert("Your dossier is too large to persist in this browser — it will still work for this visit."); }
+}
+function saveSettings() { localStorage.setItem(LS.settings, JSON.stringify(state.settings)); }
+
+function trimForQuota() {
+  state.sessions.forEach((s) => {
+    s.log = s.log.slice(-40); s.thinking = "";
+    if (s.revisions && s.revisions.length > 4) s.revisions = [s.revisions[0], ...s.revisions.slice(-3)];
+  });
+  try { localStorage.setItem(LS.sessions, JSON.stringify(state.sessions)); } catch { /* give up quietly */ }
+}
+
+function newSession() {
+  return {
+    id: "s" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+    name: "Untitled role",
+    jd: "", templateId: "udaya", aggressiveness: 2, customTemplate: null,
+    status: "draft",          // draft | running | done | error | interrupted
+    progress: 0, log: [], thinking: "", phase: "", writingSection: "",
+    jdAnalysis: null, coveragePlan: null, liveChecks: null, pages: null, passes: [],
+    result: null, chat: [], revisions: [], viewRev: null, viewTab: "pdf",
+    updatedAt: Date.now(),
+  };
+}
+const activeSession = () => state.sessions.find((s) => s.id === state.activeId);
+
+/* ══ Rail (side panel) ═════════════════════════════════════════════ */
+
+const STATUS_DOT = { draft: "", running: "run", done: "good", error: "bad", interrupted: "warn" };
+const STATUS_LABEL = { draft: "DRAFT", running: "WORKING", done: "READY", error: "ERROR", interrupted: "INTERRUPTED" };
+
+function renderRail() {
+  const list = $("session-list");
+  list.innerHTML = "";
+  state.sessions.forEach((s) => {
+    const el = document.createElement("button");
+    el.className = "session-item" + (s.id === state.activeId ? " active" : "");
+    const score = s.result ? `${s.result.score}/100` : STATUS_LABEL[s.status];
+    el.innerHTML = `
+      <span class="dot ${STATUS_DOT[s.status]}"></span>
+      <span class="session-name">${esc(s.name)}</span>
+      <span class="session-score meta">${esc(score)}</span>
+      <span class="session-del" title="Delete role">×</span>`;
+    el.addEventListener("click", (e) => {
+      if (e.target.classList.contains("session-del")) return deleteSession(s.id);
+      state.activeId = s.id; save(true); renderAll();
+    });
+    list.appendChild(el);
+  });
+
+  const p = $("profile-status");
+  if (state.profile) {
+    p.innerHTML = `<span class="dot good"></span> ${esc(state.profile.filename || "Pasted text")}`;
+  } else {
+    p.innerHTML = `<span class="dot warn"></span> No information yet`;
+  }
+}
+
+function deleteSession(id) {
+  const s = state.sessions.find((x) => x.id === id);
+  if (s.status === "running" && !confirm(`"${s.name}" is still working — cancel and delete it?`)) return;
+  stopRun(id);
+  state.sessions = state.sessions.filter((x) => x.id !== id);
+  if (!state.sessions.length) state.sessions.push(newSession());
+  if (state.activeId === id) state.activeId = state.sessions[0].id;
+  save(true); renderAll();
+}
+
+$("new-session-btn").addEventListener("click", () => {
+  const s = newSession();
+  state.sessions.unshift(s);
+  state.activeId = s.id;
+  save(true); renderAll();
 });
 
-async function checkAIStatus() {
-    const statusEl = document.getElementById('ai-status');
-    try {
-        const response = await fetch('/api/health');
-        const data = await response.json();
+/* ══ Desk (main views) ═════════════════════════════════════════════ */
 
-        if (data.ai_enabled) {
-            statusEl.innerHTML = '<span class="dot active"></span><span>AI Ready</span>';
-            statusEl.classList.add('active');
-        } else {
-            statusEl.innerHTML = '<span class="dot warning"></span><span>AI Key Not Set</span>';
-            statusEl.classList.add('warning');
-        }
-    } catch (error) {
-        statusEl.innerHTML = '<span class="dot error"></span><span>Connection Error</span>';
-        statusEl.classList.add('error');
-    }
+function renderAll() { renderRail(); renderDesk(); }
+
+function renderDesk() {
+  const s = activeSession();
+  const desk = $("desk");
+  if (!s) { desk.innerHTML = ""; return; }
+  if (s.status === "draft") return renderDraft(desk, s);
+  if (s.status === "running") return renderRunning(desk, s);
+  if (s.status === "done") return renderDone(desk, s);
+  return renderStopped(desk, s); // error | interrupted
 }
 
-function setupTabs() {
-    document.querySelectorAll('.tab-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            const panel = e.target.closest('.panel');
-            const tabId = e.target.dataset.tab;
+/* ── Draft view ── */
+function renderDraft(desk, s) {
+  desk.innerHTML = `
+  <div class="sheet">
+    <div class="sheet-top">
+      <div class="caption">Tailoring brief. One dossier in, one role-specific plate out.
+        The agent writes, scores itself, and rewrites until it passes.</div>
+      <div class="meta sheet-meta">RESUME BUILDER<br>ROLE SETUP</div>
+    </div>
 
-            panel.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-            e.target.classList.add('active');
+    <div class="display-line">Point it at <em>the job.</em></div>
 
-            panel.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-            document.getElementById(tabId).classList.add('active');
-        });
+    <div class="form-grid">
+      <div>
+        <label class="field-label">Role name <span class="opt">(optional — filled in from the job description)</span></label>
+        <input type="text" id="f-name" value="${s.nameSetByUser ? esc(s.name) : ""}" placeholder="Left blank? We'll name it from the posting.">
+      </div>
+    </div>
+
+    <label class="field-label">Job description</label>
+    <textarea id="f-jd" rows="10" placeholder="Paste the full job description here">${esc(s.jd)}</textarea>
+
+    <details class="advanced" ${s.customTemplate || s.templateId !== "udaya" || s.aggressiveness !== 2 ? "open" : ""}>
+      <summary><span class="field-label">Template &amp; aggressiveness</span></summary>
+      <div id="f-templates" class="template-grid"></div>
+      <div class="custom-template-row">
+        <input type="file" id="f-custom-template" accept=".tex" hidden>
+        <button type="button" class="linklike" id="f-custom-btn">Upload a custom LaTeX template (.tex)</button>
+        <span id="f-custom-name" class="mono small">${s.customTemplate ? esc("using " + s.customTemplate.name) : ""}</span>
+      </div>
+      <div class="agg-grid" id="f-agg">
+        ${[["1", "Polish", "Your resume, professionally edited with the JD's keywords woven in"],
+           ["2", "Tailor", "Every fact kept, but reordered and reweighted around this role"],
+           ["3", "Transform", "Designs the ideal resume for this role first, then fills it with your real evidence — including material you'd never have highlighted"]].map(([n, t, d]) => `
+          <button type="button" class="agg-option ${s.aggressiveness === +n ? "selected" : ""}" data-level="${n}">
+            <strong>${n} · ${t}</strong><span>${d}</span>
+          </button>`).join("")}
+      </div>
+    </details>
+
+    <button class="btn primary big" id="f-run">Build this resume</button>
+    <p id="f-error" class="error" hidden></p>
+
+    <div class="stub-table">
+      <div><span class="meta">DOSSIER</span><span class="mono">${state.profile ? esc(state.profile.filename || "pasted text") : "MISSING — add it in the rail"}</span></div>
+      <div><span class="meta">ENGINE</span><span class="mono">GENERATE · EVALUATE · REFINE</span></div>
+      <div><span class="meta">OUTPUT</span><span class="mono">ONE PAGE, LATEX + PDF</span></div>
+    </div>
+  </div>`;
+
+  // wire
+  $("f-name").addEventListener("input", (e) => {
+    const v = e.target.value.trim();
+    s.nameSetByUser = !!v;
+    s.name = v || "Untitled role";
+    save(); renderRail();
+  });
+  $("f-jd").addEventListener("input", (e) => { s.jd = e.target.value; save(); });
+  renderTemplateGrid(s);
+  $("f-custom-btn").addEventListener("click", () => $("f-custom-template").click());
+  $("f-custom-template").addEventListener("change", async (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    s.customTemplate = { name: f.name, text: await f.text() };
+    save(); renderDesk();
+  });
+  $("f-agg").addEventListener("click", (e) => {
+    const opt = e.target.closest(".agg-option");
+    if (!opt) return;
+    s.aggressiveness = +opt.dataset.level; save();
+    desk.querySelectorAll(".agg-option").forEach((o) => o.classList.remove("selected"));
+    opt.classList.add("selected");
+  });
+  $("f-run").addEventListener("click", () => startRun(s));
+}
+
+function renderTemplateGrid(s) {
+  const grid = $("f-templates");
+  grid.innerHTML = "";
+  state.templates.forEach((t) => {
+    const selected = !s.customTemplate && s.templateId === t.id;
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "template-card" + (selected ? " selected" : "");
+    card.innerHTML = `
+      <strong>${esc(t.name)}</strong>
+      <span>${esc(t.description)}</span>
+      <span class="tpl-peek meta">Preview ▸</span>`;
+    card.addEventListener("click", () => {
+      s.templateId = t.id; s.customTemplate = null; save();
+      $("f-custom-name").textContent = "";
+      grid.querySelectorAll(".template-card").forEach((c) => c.classList.remove("selected"));
+      card.classList.add("selected");
     });
-}
-
-function setupFileUploads() {
-    document.getElementById('resume-file').addEventListener('change', (e) => {
-        const file = e.target.files[0];
-        if (file) {
-            document.getElementById('resume-filename').textContent = file.name;
-            const reader = new FileReader();
-            reader.onload = (event) => {
-                document.getElementById('resume-input').value = event.target.result;
-            };
-            reader.readAsText(file);
-        }
+    // Preview on hover/focus, and on clicking the peek label (touch).
+    let timer = null;
+    const open = () => { timer = setTimeout(() => showTemplatePreview(t, card), 220); };
+    const close = () => { clearTimeout(timer); hideTemplatePreview(); };
+    card.addEventListener("mouseenter", open);
+    card.addEventListener("mouseleave", close);
+    card.addEventListener("focus", () => showTemplatePreview(t, card));
+    card.addEventListener("blur", close);
+    card.querySelector(".tpl-peek").addEventListener("click", (e) => {
+      e.stopPropagation(); showTemplatePreview(t, card, true);
     });
-
-    document.getElementById('job-file').addEventListener('change', (e) => {
-        const file = e.target.files[0];
-        if (file) {
-            document.getElementById('job-filename').textContent = file.name;
-            const reader = new FileReader();
-            reader.onload = (event) => {
-                document.getElementById('job-input').value = event.target.result;
-            };
-            reader.readAsText(file);
-        }
-    });
+    grid.appendChild(card);
+  });
 }
 
-function setupButtons() {
-    document.getElementById('analyze-btn').addEventListener('click', analyzeJob);
-    document.getElementById('tailor-btn').addEventListener('click', tailorResumeStream);
-    document.getElementById('import-url-btn').addEventListener('click', importFromURL);
+/* ── Template preview popover (compiled PDF of the blank template) ── */
 
-    // Copy buttons
-    document.getElementById('copy-latex').addEventListener('click', () => {
-        copyToClipboard(document.getElementById('latex-code').textContent, 'LaTeX');
-    });
+let previewEl = null;
 
-    document.getElementById('copy-report').addEventListener('click', () => {
-        copyToClipboard(window.matchReport || '', 'Report');
-    });
-
-    // Download buttons
-    document.getElementById('download-latex').addEventListener('click', () => {
-        downloadFile('tailored_resume.tex', document.getElementById('latex-code').textContent);
-    });
-
-    document.getElementById('download-report').addEventListener('click', () => {
-        downloadFile('match_report.md', window.matchReport || '');
-    });
-
-    // Export buttons
-    document.getElementById('export-pdf').addEventListener('click', exportPDF);
-    document.getElementById('export-txt').addEventListener('click', exportTXT);
+function hideTemplatePreview() {
+  if (previewEl) { previewEl.remove(); previewEl = null; }
 }
 
-function setupOutputTabs() {
-    document.querySelectorAll('.output-tab').forEach(tab => {
-        tab.addEventListener('click', (e) => {
-            const outputId = e.target.dataset.output;
-
-            document.querySelectorAll('.output-tab').forEach(t => t.classList.remove('active'));
-            e.target.classList.add('active');
-
-            document.querySelectorAll('.output-content').forEach(c => c.classList.remove('active'));
-            document.getElementById(`${outputId}-output`).classList.add('active');
-        });
-    });
+function showTemplatePreview(t, anchor, pinned = false) {
+  hideTemplatePreview();
+  previewEl = document.createElement("div");
+  previewEl.className = "tpl-preview" + (pinned ? " pinned" : "");
+  previewEl.innerHTML = `
+    <div class="tpl-preview-head">
+      <span class="meta">${esc(t.name)} — TEMPLATE PREVIEW</span>
+      ${pinned ? `<button class="linklike" data-close="1">close</button>` : ""}
+    </div>
+    <iframe class="tpl-frame" title="${esc(t.name)} preview"
+      src="/api/templates/${encodeURIComponent(t.id)}/preview.pdf#toolbar=0&navpanes=0&view=FitH"></iframe>`;
+  document.body.appendChild(previewEl);
+  const r = anchor.getBoundingClientRect();
+  const w = previewEl.offsetWidth || 420;
+  previewEl.style.left = `${Math.max(12, Math.min(window.innerWidth - w - 12, r.left))}px`;
+  const below = window.innerHeight - r.bottom;
+  if (below > 380) previewEl.style.top = `${r.bottom + 8}px`;
+  else previewEl.style.bottom = `${window.innerHeight - r.top + 8}px`;
+  if (pinned) {
+    previewEl.addEventListener("click", (e) => { if (e.target.dataset.close) hideTemplatePreview(); });
+  } else {
+    previewEl.addEventListener("mouseenter", () => previewEl.classList.add("pinned"));
+    previewEl.addEventListener("mouseleave", hideTemplatePreview);
+  }
 }
 
-function setupModal() {
-    const modal = document.getElementById('edit-modal');
-    const closeBtn = document.getElementById('modal-close');
-    const cancelBtn = document.getElementById('edit-cancel');
-    const saveBtn = document.getElementById('edit-save');
-    const newTextArea = document.getElementById('edit-new-text');
-
-    closeBtn.addEventListener('click', () => modal.classList.add('hidden'));
-    cancelBtn.addEventListener('click', () => modal.classList.add('hidden'));
-
-    modal.addEventListener('click', (e) => {
-        if (e.target === modal) modal.classList.add('hidden');
-    });
-
-    newTextArea.addEventListener('input', updateEditStats);
-    saveBtn.addEventListener('click', saveBulletEdit);
+function formError(msg) {
+  const el = $("f-error");
+  if (!el) return alert(msg);
+  el.textContent = msg; el.hidden = false;
+  setTimeout(() => { el.hidden = true; }, 8000);
 }
 
-function setupKeywordChecklist() {
-    document.addEventListener('click', (e) => {
-        if (e.target.classList.contains('keyword-tag') &&
-            e.target.closest('.checklist')) {
-            e.target.classList.toggle('checked');
-            const keyword = e.target.textContent;
-            if (checkedKeywords.has(keyword)) {
-                checkedKeywords.delete(keyword);
-            } else {
-                checkedKeywords.add(keyword);
-            }
-        }
-    });
+/* ── Running view ── */
+const PHASES = [["analyze", "Analyze"], ["generate", "Write"], ["evaluate", "Evaluate"], ["refine", "Refine"]];
+
+function renderRunning(desk, s) {
+  const pages = s.pages;
+  const lc = s.liveChecks || {};
+  const cov = (lc.keywords || {}).must_have;
+  const latest = (s.passes || [])[s.passes.length - 1];
+
+  desk.innerHTML = `
+  <div class="sheet cobalt dash">
+    <div class="dash-head">
+      <div>
+        <div class="display-line tight">Building <em>${esc(s.name)}.</em></div>
+        <div class="caption">Live trace. Every number below is measured, not estimated.</div>
+      </div>
+      <div class="meta sheet-meta">RESUME BUILDER<br>AGENT RUNNING</div>
+    </div>
+
+    <div class="stat-row" id="r-stats">${statRow(s, latest, cov, pages)}</div>
+
+    <div class="phase-chips" id="r-phases">
+      ${PHASES.map(([k, label]) => `<span class="phase-chip ${s.phase === k ? "on" : ""}" data-phase="${k}">${label}</span>`).join("<span class='phase-sep'>→</span>")}
+    </div>
+    <div class="progress-track"><div id="r-bar" class="progress-bar" style="width:${s.progress}%"></div></div>
+    <div class="running-meta">
+      <span class="meta" id="r-writing">${s.writingSection ? "WRITING: " + esc(s.writingSection.toUpperCase()) : ""}</span>
+      <button class="linklike light" id="r-cancel">cancel run</button>
+    </div>
+
+    <div class="dash-grid">
+      <section class="dash-panel span2">
+        <div class="panel-head"><span class="meta">MODEL REASONING · LIVE</span></div>
+        <pre id="r-think" class="think-stream">${s.thinking ? esc(s.thinking)
+          : "Waiting for the model's reasoning…\n\nThe model only narrates when it actually deliberates, so this stays empty on\nstraightforward steps. Progress is still visible in the bar and the activity log."}</pre>
+      </section>
+
+      <section class="dash-panel">
+        <div class="panel-head"><span class="meta">ATS KEYWORDS</span></div>
+        <div class="panel-body kw-live" id="r-keywords">${keywordPanel(s)}</div>
+      </section>
+
+      <section class="dash-panel span2">
+        <div class="panel-head"><span class="meta">ACTIVITY</span></div>
+        <ul id="r-log" class="progress-log">
+          ${s.log.map((l) => `<li class="${esc(l.kind || "")}">${esc(l.text)}</li>`).join("")}
+        </ul>
+      </section>
+
+      <section class="dash-panel">
+        <div class="panel-head"><span class="meta">EVALUATION PASSES</span></div>
+        <div class="panel-body pass-panel" id="r-passes">${passPanel(s)}</div>
+      </section>
+    </div>
+  </div>`;
+
+  $("r-cancel").addEventListener("click", () => {
+    stopRun(s.id);
+    s.status = "interrupted"; pushLog(s, "Run cancelled.", "error");
+    save(true); renderAll();
+  });
+  const log = $("r-log"); log.scrollTop = log.scrollHeight;
+  const think = $("r-think"); think.scrollTop = think.scrollHeight;
 }
 
-async function importFromURL() {
-    const urlInput = document.getElementById('job-url-input');
-    const url = urlInput.value.trim();
-
-    if (!url) {
-        showError('Please enter a URL');
-        return;
-    }
-
-    showLoading(true, 'Importing job description from URL...', 0);
-    hideError();
-
-    try {
-        const response = await fetch('/api/import-url', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url })
-        });
-
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.detail || 'Failed to import URL');
-        }
-
-        const data = await response.json();
-        document.getElementById('job-input').value = data.job_description;
-
-        const pasteBtn = document.querySelector('[data-tab="job-paste"]');
-        pasteBtn.click();
-
-    } catch (error) {
-        showError(error.message);
-    } finally {
-        showLoading(false);
-    }
+/* The four numbers that actually tell you how the run is going. */
+function statRow(s, latest, cov, pages) {
+  const cells = [
+    ["SCORE", latest ? `${latest.total}` : "—", latest ? "/100" : "", latest && latest.total >= 95 ? "good" : ""],
+    ["PAGES", pages ? `${pages}` : "—", pages ? (pages > 1 ? "must be 1" : "one page") : "not compiled yet",
+      pages && pages > 1 ? "bad" : (pages === 1 ? "good" : "")],
+    ["KEYWORDS", cov ? `${cov.matched.length}` : "—", cov ? `/${cov.matched.length + cov.missing.length} placed` : "pending", ""],
+    ["PASS", `${(s.passes || []).length}`, "of 4", ""],
+  ];
+  return cells.map(([label, big, sub, tone]) => `
+    <div class="stat">
+      <span class="meta">${label}</span>
+      <span class="stat-big ${tone}">${esc(big)}<small>${esc(sub)}</small></span>
+    </div>`).join("");
 }
 
-async function analyzeJob() {
-    const jobDescription = document.getElementById('job-input').value;
+/* ── Revision strip: every version is kept, viewable and downloadable ── */
 
-    if (!jobDescription.trim()) {
-        showError('Please enter a job description first.');
-        return;
-    }
-
-    showLoading(true, 'AI is analyzing the job description...', 0);
-    hideError();
-
-    try {
-        const formData = new FormData();
-        formData.append('job_description', jobDescription);
-
-        const response = await fetch('/api/analyze-job', {
-            method: 'POST',
-            body: formData
-        });
-
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.detail || 'Failed to analyze job description');
-        }
-
-        const data = await response.json();
-        displayJobAnalysis(data);
-
-    } catch (error) {
-        showError(error.message);
-    } finally {
-        showLoading(false);
-    }
+function revStrip(s) {
+  const revs = s.revisions || [];
+  if (revs.length <= 1) return `<span class="meta">REV 1 · ORIGINAL</span>`;
+  const cur = revIndex(s);
+  return `<span class="meta">REVISIONS</span>` + revs.map((r, i) => `
+    <button class="rev-chip ${i === cur ? "on" : ""}" data-rev="${i}"
+      title="${esc(r.label)}">R${i + 1}</button>`).join("")
+    + (cur !== revs.length - 1 ? `<span class="meta rev-viewing">VIEWING R${cur + 1} — ${esc(revs[cur].label)} · EDITS APPLY TO R${revs.length}</span>`
+                               : `<span class="meta rev-viewing">${esc(revs[cur].label)}</span>`);
 }
 
-async function tailorResumeStream() {
-    const resumeContent = document.getElementById('resume-input').value;
-    const jobDescription = document.getElementById('job-input').value;
-    const maxExperiences = parseInt(document.getElementById('max-experiences').value) || 4;
-    const maxBullets = parseInt(document.getElementById('max-bullets').value) || 4;
+/* ── Pass-by-pass timeline: what each iteration scored and what it's fixing ── */
 
-    if (!resumeContent.trim()) {
-        showError('Please enter your resume content.');
-        return;
-    }
+const CAT_LABEL = {
+  keyword_match: "Keywords", ats_compliance: "ATS", writing_quality: "Writing",
+  truthfulness: "Truthful", page_fit: "Page fit", latex: "LaTeX",
+};
+const CAT_CAP = { keyword_match: 30, ats_compliance: 20, writing_quality: 20, truthfulness: 20, page_fit: 10 };
 
-    if (!jobDescription.trim()) {
-        showError('Please enter a job description.');
-        return;
-    }
-
-    showLoading(true, 'Starting AI tailoring...', 0);
-    hideError();
-
-    try {
-        const response = await fetch('/api/tailor/stream', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                resume_content: resumeContent,
-                job_description: jobDescription,
-                max_experiences: maxExperiences,
-                max_bullets: maxBullets
-            })
-        });
-
-        if (!response.ok) {
-            throw new Error('Failed to start tailoring');
-        }
-
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || '';
-
-            for (const line of lines) {
-                if (line.startsWith('data: ')) {
-                    try {
-                        const data = JSON.parse(line.slice(6));
-                        handleStreamUpdate(data);
-                    } catch (e) {
-                        console.error('Failed to parse SSE data:', e);
-                    }
-                }
-            }
-        }
-
-    } catch (error) {
-        showError(error.message);
-        showLoading(false);
-    }
-}
-
-function handleStreamUpdate(data) {
-    if (data.step === 'error') {
-        showError(data.message);
-        showLoading(false);
-        return;
-    }
-
-    if (data.step === 'result') {
-        // Final result received
-        currentLatex = data.tailored_resume;
-        originalLatex = data.original_resume;
-        currentValidation = data.validation;
-
-        displayResults(data);
-
-        if (data.job_analysis) {
-            displayJobAnalysisFromResult(data.job_analysis);
-        }
-
-        checkCompilation(currentLatex);
-        showLoading(false);
-        return;
-    }
-
-    // Progress update
-    const progress = data.progress || 0;
-    const message = data.message || 'Processing...';
-
-    showLoading(true, message, progress);
-
-    // Show additional data if available
-    if (data.data) {
-        if (data.data.keywords_count) {
-            showLoading(true, `${message} (${data.data.keywords_count} keywords found)`, progress);
-        }
-        if (data.data.coverage !== undefined) {
-            showLoading(true, `${message} (${data.data.coverage}% keyword coverage)`, progress);
-        }
-    }
-}
-
-function displayJobAnalysis(data) {
-    const container = document.getElementById('job-analysis');
-    container.classList.remove('hidden');
-
-    const jobTitle = document.getElementById('job-title');
-    if (data.role_title) {
-        jobTitle.textContent = data.role_title;
-        jobTitle.classList.remove('hidden');
-    }
-
-    const requiredSkills = document.getElementById('required-skills');
-    requiredSkills.innerHTML = (data.required_skills || [])
-        .map(s => `<span class="keyword-tag required">${s}</span>`)
-        .join('') || '<span class="empty-state">None specified</span>';
-
-    const preferredSkills = document.getElementById('preferred-skills');
-    preferredSkills.innerHTML = (data.preferred_skills || [])
-        .map(s => `<span class="keyword-tag preferred">${s}</span>`)
-        .join('') || '<span class="empty-state">None specified</span>';
-
-    const techSkills = document.getElementById('tech-skills');
-    techSkills.innerHTML = (data.key_technologies || [])
-        .map(s => `<span class="keyword-tag tech">${s}</span>`)
-        .join('') || '<span class="empty-state">None specified</span>';
-
-    const actionVerbs = document.getElementById('action-verbs');
-    actionVerbs.innerHTML = (data.action_verbs || [])
-        .map(v => `<span class="keyword-tag verb">${v}</span>`)
-        .join('') || '<span class="empty-state">None extracted</span>';
-
-    const responsibilitiesSection = document.getElementById('responsibilities-section');
-    const responsibilitiesList = document.getElementById('responsibilities-list');
-    if (data.key_responsibilities && data.key_responsibilities.length > 0) {
-        responsibilitiesSection.classList.remove('hidden');
-        responsibilitiesList.innerHTML = data.key_responsibilities
-            .slice(0, 5)
-            .map(r => `<li>${r}</li>`)
-            .join('');
-    } else {
-        responsibilitiesSection.classList.add('hidden');
-    }
-}
-
-function displayJobAnalysisFromResult(analysis) {
-    const container = document.getElementById('job-analysis');
-    container.classList.remove('hidden');
-
-    const jobTitle = document.getElementById('job-title');
-    if (analysis.role_title) {
-        jobTitle.textContent = analysis.role_title;
-    }
-
-    const requiredSkills = document.getElementById('required-skills');
-    requiredSkills.innerHTML = (analysis.required_skills || [])
-        .map(s => `<span class="keyword-tag required">${s}</span>`)
-        .join('') || '<span class="empty-state">None specified</span>';
-
-    const preferredSkills = document.getElementById('preferred-skills');
-    preferredSkills.innerHTML = (analysis.preferred_skills || [])
-        .map(s => `<span class="keyword-tag preferred">${s}</span>`)
-        .join('') || '<span class="empty-state">None specified</span>';
-
-    const techSkills = document.getElementById('tech-skills');
-    techSkills.innerHTML = (analysis.key_technologies || [])
-        .map(s => `<span class="keyword-tag tech">${s}</span>`)
-        .join('') || '<span class="empty-state">None specified</span>';
-
-    const actionVerbs = document.getElementById('action-verbs');
-    actionVerbs.innerHTML = (analysis.action_verbs || [])
-        .map(v => `<span class="keyword-tag verb">${v}</span>`)
-        .join('') || '<span class="empty-state">None extracted</span>';
-
-    const responsibilitiesSection = document.getElementById('responsibilities-section');
-    const responsibilitiesList = document.getElementById('responsibilities-list');
-    if (analysis.key_responsibilities && analysis.key_responsibilities.length > 0) {
-        responsibilitiesSection.classList.remove('hidden');
-        responsibilitiesList.innerHTML = analysis.key_responsibilities
-            .slice(0, 5)
-            .map(r => `<li>${r}</li>`)
-            .join('');
-    }
-}
-
-function displayResults(data) {
-    const container = document.getElementById('results');
-    container.classList.remove('hidden');
-
-    const passesBadge = document.getElementById('passes-badge');
-    passesBadge.textContent = `${data.passes_completed || 1} pass${data.passes_completed > 1 ? 'es' : ''} completed`;
-
-    displayValidationStatus(data.validation);
-    displayVerbTracker(data.validation.verb_counts);
-
-    const score = data.keyword_coverage;
-    const scoreProgress = document.getElementById('score-progress');
-    scoreProgress.style.strokeDasharray = `${score}, 100`;
-
-    if (score >= 80) {
-        scoreProgress.style.stroke = '#22c55e';
-    } else if (score >= 60) {
-        scoreProgress.style.stroke = '#f59e0b';
-    } else {
-        scoreProgress.style.stroke = '#ef4444';
-    }
-
-    document.getElementById('score-value').textContent = `${score}%`;
-
-    const matchedKeywords = document.getElementById('matched-keywords');
-    document.getElementById('matched-count').textContent = `(${data.matched_keywords.length})`;
-    matchedKeywords.innerHTML = data.matched_keywords
-        .map(k => `<span class="keyword-tag">${k}</span>`)
-        .join('') || '<span class="empty-state">None matched</span>';
-
-    const missingKeywords = document.getElementById('missing-keywords');
-    document.getElementById('missing-count').textContent = `(${data.missing_keywords.length})`;
-    missingKeywords.innerHTML = data.missing_keywords
-        .map(k => `<span class="keyword-tag">${k}</span>`)
-        .join('') || '<span class="empty-state">All keywords matched!</span>';
-
-    displayBulletSuggestions(data.bullet_suggestions);
-
-    document.getElementById('latex-code').textContent = data.tailored_resume;
-
-    displayDiffView(data.diff_data);
-    displayBulletAnalysis(data.validation.bullet_analyses);
-
-    window.matchReport = generateMatchReport(data);
-    document.getElementById('report-content').innerHTML = markdownToHtml(window.matchReport);
-
-    container.scrollIntoView({ behavior: 'smooth', block: 'start' });
-}
-
-function displayValidationStatus(validation) {
-    const badge = document.getElementById('validation-badge');
-    const totalBullets = document.getElementById('total-bullets');
-    const wrongLength = document.getElementById('bullets-wrong-length');
-    const noQuant = document.getElementById('bullets-no-quant');
-    const repeatedVerbs = document.getElementById('repeated-verbs-count');
-
-    if (validation.is_valid) {
-        badge.textContent = 'All Rules Passed';
-        badge.className = 'validation-badge valid';
-    } else {
-        const issues = validation.bullets_wrong_length + validation.bullets_no_quantification + validation.repeated_verbs.length;
-        badge.textContent = `${issues} Issues Found`;
-        badge.className = 'validation-badge invalid';
-    }
-
-    totalBullets.textContent = validation.total_bullets;
-    totalBullets.className = 'validation-value';
-
-    wrongLength.textContent = validation.bullets_wrong_length;
-    wrongLength.className = `validation-value ${validation.bullets_wrong_length === 0 ? 'good' : 'bad'}`;
-
-    noQuant.textContent = validation.bullets_no_quantification;
-    noQuant.className = `validation-value ${validation.bullets_no_quantification === 0 ? 'good' : 'bad'}`;
-
-    repeatedVerbs.textContent = validation.repeated_verbs.length;
-    repeatedVerbs.className = `validation-value ${validation.repeated_verbs.length === 0 ? 'good' : 'bad'}`;
-}
-
-function displayVerbTracker(verbCounts) {
-    const container = document.getElementById('verb-tracker-content');
-
-    if (!verbCounts || Object.keys(verbCounts).length === 0) {
-        container.innerHTML = '<p class="empty-state">No verbs detected</p>';
-        return;
-    }
-
-    const sorted = Object.entries(verbCounts).sort((a, b) => b[1] - a[1]);
-
-    container.innerHTML = sorted.map(([verb, count]) => {
-        let className = 'verb-item';
-        if (count > 2) className += ' overused';
-        else if (count === 2) className += ' warning';
-
-        return `
-            <div class="${className}">
-                <span class="verb-name">${verb}</span>
-                <span class="verb-count">${count}</span>
-            </div>
-        `;
-    }).join('');
-}
-
-function displayBulletSuggestions(suggestions) {
-    const container = document.getElementById('bullet-suggestions');
-    const list = document.getElementById('suggestions-list');
-
-    if (!suggestions || suggestions.length === 0) {
-        container.classList.add('hidden');
-        return;
-    }
-
-    container.classList.remove('hidden');
-    list.innerHTML = suggestions.map(s => `
-        <div class="suggestion-item">
-            <span class="suggestion-keyword">${s.keyword}</span>
-            <p class="suggestion-text">${s.suggestion}</p>
+function passPanel(s) {
+  if (!s.passes || !s.passes.length) {
+    return `<div class="meta">EVALUATION PASSES</div>
+      <div class="caption kw-waiting">The first score lands after the draft is written.</div>`;
+  }
+  const rows = s.passes.map((p, idx) => {
+    const prev = idx > 0 ? s.passes[idx - 1].total : null;
+    const delta = prev === null ? "" : (p.total - prev >= 0 ? `+${p.total - prev}` : `${p.total - prev}`);
+    return `
+      <div class="pass-row">
+        <div class="pass-head">
+          <span class="meta">PASS ${p.iteration}</span>
+          <span class="pass-score">${p.total}<small>/100</small>${delta ? `<span class="pass-delta">${esc(delta)}</span>` : ""}</span>
+          <span class="meta pass-verdict ${p.verdict === "pass" ? "good-text" : ""}">${esc((p.verdict || "").toUpperCase())}</span>
         </div>
-    `).join('');
+        ${p.pages ? `<div class="meta pass-pages ${p.pages > 1 ? "warn-text" : ""}">COMPILED ${p.pages} PAGE${p.pages > 1 ? "S — MUST CUT" : ""}</div>` : ""}
+        <div class="pass-cats">
+          ${Object.keys(CAT_CAP).map((c) => p.scores?.[c]
+            ? `<span class="pass-cat" title="${esc(p.scores[c].evidence || "")}">${CAT_LABEL[c]} <b>${p.scores[c].score}/${CAT_CAP[c]}</b></span>`
+            : "").join("")}
+        </div>
+        ${(p.issues || []).length ? `
+          <details class="pass-issues" ${idx === s.passes.length - 1 ? "open" : ""}>
+            <summary class="meta">${p.issues.length} ISSUE(S) SENT BACK TO THE WRITER</summary>
+            <ul class="issues">${p.issues.map((i) => `<li><em>${esc(CAT_LABEL[i.category] || i.category)}</em> ${esc(i.fix)}</li>`).join("")}</ul>
+          </details>` : `<div class="meta good-text">NO ISSUES FOUND</div>`}
+      </div>`;
+  }).join("");
+  return `<div class="meta">EVALUATION PASSES · SCORE BEFORE → AFTER</div>${rows}`;
 }
 
-function displayDiffView(diffData) {
-    const container = document.getElementById('diff-content');
+/* ── The ATS keyword panel: every extracted keyword, and whether it landed ── */
 
-    if (!diffData || (!diffData.added && !diffData.removed && !diffData.modified)) {
-        container.innerHTML = '<p class="empty-state">No changes to display</p>';
-        return;
-    }
+const TIERS = [
+  ["must_have", "must_have_keywords", "MUST-HAVE KEYWORDS", "Required by the JD — these drive the ATS score"],
+  ["nice_to_have", "nice_to_have_keywords", "NICE-TO-HAVE", "Preferred/bonus items"],
+];
 
-    let html = '';
-
-    if (diffData.removed && diffData.removed.length > 0) {
-        html += `
-            <div class="diff-section">
-                <div class="diff-section-title">Removed Bullets</div>
-                ${diffData.removed.map(line => `<div class="diff-line removed">${escapeHtml(line)}</div>`).join('')}
-            </div>
-        `;
-    }
-
-    if (diffData.added && diffData.added.length > 0) {
-        html += `
-            <div class="diff-section">
-                <div class="diff-section-title">Added/Modified Bullets</div>
-                ${diffData.added.map(line => `<div class="diff-line added">${escapeHtml(line)}</div>`).join('')}
-            </div>
-        `;
-    }
-
-    container.innerHTML = html || '<p class="empty-state">No significant changes</p>';
+function keywordPanel(s) {
+  const jd = s.jdAnalysis || s.result?.jd_analysis;
+  if (!jd) {
+    return `<div class="meta">ATS KEYWORDS</div><div class="caption kw-waiting">Extracting from the job description…</div>`;
+  }
+  const checks = s.liveChecks || s.result?.local_checks || {};
+  const cov = checks.keywords || {};
+  const plan = s.coveragePlan || s.result?.coverage_plan;
+  const absent = new Set(plan?.absent || checks.unsupported || []);
+  const html = TIERS.map(([tierKey, jdKey, label, blurb]) => {
+    let all = jd[jdKey] || [];
+    if (tierKey !== "traits") all = all.filter((k) => !absent.has(k));
+    if (!all.length) return "";
+    const tier = cov[tierKey];
+    const matched = new Set(tier ? tier.matched : []);
+    const scored = !!tier;
+    const placed = all.filter((k) => matched.has(k));
+    const missing = all.filter((k) => !matched.has(k));
+    return `
+      <div class="kw-tier">
+        <div class="kw-tier-head">
+          <span class="meta">${label}</span>
+          <span class="meta kw-count">${scored ? `${placed.length}/${all.length} IN RESUME` : `${all.length} FOUND`}</span>
+        </div>
+        <div class="caption kw-blurb">${blurb}</div>
+        ${!scored ? `<div class="chips">${all.map((k) => `<span class="chip">${esc(k)}</span>`).join("")}</div>` : ""}
+        ${scored && placed.length ? `
+          <div class="kw-group"><span class="meta kw-group-label">✓ IN THE RESUME</span>
+            <div class="chips">${placed.map((k) => `<span class="chip placed">${esc(k)}</span>`).join("")}</div></div>` : ""}
+        ${scored && missing.length ? `
+          <div class="kw-group"><span class="meta kw-group-label missing-label">✗ NOT YET INCLUDED</span>
+            <div class="chips missing">${missing.map((k) => `<span class="chip">${esc(k)}</span>`).join("")}</div></div>` : ""}
+      </div>`;
+  }).join("");
+  const gapBlock = absent.size ? `
+    <div class="kw-tier kw-gap">
+      <div class="kw-tier-head">
+        <span class="meta">NOT IN YOUR BACKGROUND</span>
+        <span class="meta kw-count">${absent.size} REQUIREMENT${absent.size > 1 ? "S" : ""}</span>
+      </div>
+      <div class="caption kw-blurb">The job asks for these and your dossier has no evidence for them.
+        They are deliberately left out — never invented — and they don't count against your score.
+        This is the honest gap between you and the posting.</div>
+      <div class="chips gap">${[...absent].map((k) => `<span class="chip">${esc(k)}</span>`).join("")}</div>
+    </div>` : "";
+  const traitList = jd.soft_signals || [];
+  const traitBlock = traitList.length ? `
+    <div class="kw-tier">
+      <div class="kw-tier-head">
+        <span class="meta">FRAMING SIGNALS</span>
+        <span class="meta kw-count">${traitList.length} CUES</span>
+      </div>
+      <div class="caption kw-blurb">Narrative qualities the posting wants. These shape how your work is
+        described rather than appearing as literal keywords.</div>
+      <div class="chips">${traitList.map((k) => `<span class="chip soft">${esc(k)}</span>`).join("")}</div>
+    </div>` : "";
+  return `<div class="kw-head"><span class="meta">ATS KEYWORDS EXTRACTED FROM THE JOB DESCRIPTION</span>
+    <span class="meta kw-note">${cov.must_have ? "Checked against the current draft" : "Coverage is checked after the first pass"}</span></div>${html}${traitBlock}${gapBlock}`;
 }
 
-function displayBulletAnalysis(bullets) {
-    const container = document.getElementById('bullets-analysis');
-    const validStat = document.getElementById('valid-bullets-stat');
-    const invalidStat = document.getElementById('invalid-bullets-stat');
+/* ── Done view ── */
+const CAPS = { keyword_match: 30, ats_compliance: 20, writing_quality: 20, truthfulness: 20, page_fit: 10 };
+const LABELS = {
+  keyword_match: "Keyword match", ats_compliance: "ATS compliance",
+  writing_quality: "Writing quality", truthfulness: "Truthfulness", page_fit: "Page fit",
+};
 
-    if (!bullets || bullets.length === 0) {
-        container.innerHTML = '<p class="empty-state">No bullets to analyze</p>';
-        return;
+function renderDone(desk, s) {
+  const r = s.result;
+  const lc = r.local_checks || {};
+  desk.innerHTML = `
+  <div class="sheet">
+    <div class="sheet-top">
+      <div class="caption">Final plate. Scored by an ATS pass, a recruiter read, and a
+        fact-check against your dossier. Chat below to adjust anything.</div>
+      <div class="meta sheet-meta">RESUME BUILDER<br>SCORE ${r.score}/100 · ${esc(r.verdict.toUpperCase())}</div>
+    </div>
+
+    <div class="display-line">${esc(r.jd_analysis.role_title || s.name)}<em>${r.jd_analysis.company ? " @ " + esc(r.jd_analysis.company) : ""}</em></div>
+
+    <div class="result-grid">
+      <div class="score-block">
+        <div class="score-num ${r.score >= 88 ? "good" : r.score >= 70 ? "ok" : "bad"}">${r.score}<small>/100</small></div>
+        <div class="score-bars">
+          ${Object.entries(CAPS).map(([cat, cap]) => `
+            <div class="score-bar-row" title="${esc(r.scores[cat].evidence)}">
+              <span>${LABELS[cat]}</span>
+              <div class="bar"><div style="width:${Math.min(100, (r.scores[cat].score / cap) * 100)}%"></div></div>
+              <span class="val mono">${r.scores[cat].score}/${cap}</span>
+            </div>`).join("")}
+        </div>
+      </div>
+      <div class="kw-block kw-live">${keywordPanel(s)}</div>
+    </div>
+
+    ${(r.issues || []).length ? `
+    <details class="issues-details">
+      <summary class="meta">EVALUATOR NOTES (${r.issues.length})</summary>
+      <ul class="issues">${r.issues.map((i) => `<li><em>${esc(i.category)}</em> ${esc(i.fix)}</li>`).join("")}</ul>
+    </details>` : ""}
+
+    <div class="work-grid">
+      <div class="latex-pane">
+        <div class="pane-head">
+          <span class="tab-row">
+            <button class="tab ${s.viewTab !== "tex" ? "on" : ""}" id="d-tab-pdf">PDF</button>
+            <button class="tab ${s.viewTab === "tex" ? "on" : ""}" id="d-tab-tex">TEX</button>
+            <span class="meta page-badge ${s.pages && s.pages > 1 ? "over" : ""}" id="d-pages">${
+              s.pages ? `${s.pages} PAGE${s.pages > 1 ? "S ⚠" : ""}` : ""}</span>
+          </span>
+          <span class="btn-row">
+            <button class="btn ghost sm" id="d-copy">Copy</button>
+            <button class="btn ghost sm" id="d-tex">.tex</button>
+            <button class="btn primary sm" id="d-pdf" title="Compiled via latex.ytotech.com — the resume content is sent there to build the PDF">Save PDF</button>
+          </span>
+        </div>
+        <div class="rev-strip" id="d-revs">${revStrip(s)}</div>
+        <div id="d-preview" class="preview-box">
+          <pre id="d-latex" class="latex-block" ${s.viewTab === "tex" ? "" : "hidden"}>${esc(currentLatex(s))}</pre>
+          <div id="d-pdf-view" class="pdf-view" ${s.viewTab === "tex" ? "hidden" : ""}></div>
+        </div>
+      </div>
+
+      <div class="chat-pane">
+        <div class="pane-head"><span class="meta">EDIT BY CHAT</span></div>
+        <div id="d-chat" class="chat-log">
+          ${s.chat.length ? s.chat.map((m) => chatBubble(m.role, m.content)).join("")
+            : `<div class="chat-empty caption">Tell it what to change — "make the dates bolder",
+               "remove the paintball project", "the second KPMG bullet isn't using its line well".</div>`}
+        </div>
+        <div id="d-chat-live" class="chat-live" hidden>
+          <div class="meta">EDITING…</div><pre class="think-stream sm" id="d-chat-think"></pre>
+        </div>
+        <div class="chat-input-row">
+          <textarea id="d-chat-input" rows="2" placeholder="Describe an edit..."></textarea>
+          <button class="btn primary" id="d-chat-send">Send</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="stub-table">
+      <div><span class="meta">PASSES</span><span class="mono">${(r.iterations || []).map((h) => h.total).join(" → ") || "1"}</span></div>
+      <div><span class="meta">AGGRESSIVENESS</span><span class="mono">LEVEL ${r.aggressiveness}</span></div>
+      <div><span class="meta">REBUILD</span><span class="mono"><button class="linklike" id="d-rerun">RUN AGAIN</button></span></div>
+    </div>
+  </div>`;
+
+  $("d-copy").addEventListener("click", async () => {
+    await navigator.clipboard.writeText(currentLatex(s));
+    $("d-copy").textContent = "Copied!"; setTimeout(() => { const b = $("d-copy"); if (b) b.textContent = "Copy"; }, 1400);
+  });
+    $("d-tex").addEventListener("click", () => download(s, "/api/export/tex", `resume-r${revIndex(s) + 1}.tex`, $("d-tex")));
+  $("d-pdf").addEventListener("click", () => savePdf(s, $("d-pdf")));
+  $("d-tab-pdf").addEventListener("click", () => { s.viewTab = "pdf"; save(); toggleTab(s); });
+  $("d-tab-tex").addEventListener("click", () => { s.viewTab = "tex"; save(); toggleTab(s); });
+  if (s.viewTab !== "tex") showPdfPreview(s);
+  $("d-rerun").addEventListener("click", () => { s.status = "draft"; save(true); renderAll(); });
+  const revBar = $("d-revs");
+  if (revBar) revBar.addEventListener("click", (e) => {
+    const chip = e.target.closest(".rev-chip");
+    if (!chip) return;
+    s.viewRev = +chip.dataset.rev;
+    save(); renderDesk();
+  });
+  $("d-chat-send").addEventListener("click", () => sendEdit(s));
+  $("d-chat-input").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendEdit(s); }
+  });
+  const chat = $("d-chat"); chat.scrollTop = chat.scrollHeight;
+}
+
+const chatBubble = (role, text) =>
+  `<div class="chat-msg ${role === "user" ? "user" : "editor"}"><span class="meta">${role === "user" ? "YOU" : "EDITOR"}</span>${esc(text)}</div>`;
+
+function revIndex(s) {
+  const n = (s.revisions || []).length;
+  if (!n) return -1;
+  return s.viewRev == null || s.viewRev < 0 || s.viewRev >= n ? n - 1 : s.viewRev;
+}
+const latestLatex = (s) => (s.revisions?.length ? s.revisions[s.revisions.length - 1].latex : s.result.latex);
+function currentLatex(s) {
+  const i = revIndex(s);
+  return i >= 0 ? s.revisions[i].latex : s.result.latex;
+}
+const viewingLatest = (s) => revIndex(s) === (s.revisions?.length || 1) - 1;
+
+/* ── Stopped view (error / interrupted) ── */
+function renderStopped(desk, s) {
+  const isErr = s.status === "error";
+  desk.innerHTML = `
+  <div class="sheet ${isErr ? "" : "ink"}">
+    <div class="sheet-top">
+      <div class="caption">${isErr ? "The run failed. The trace below shows where." :
+        "This run was interrupted — a reload or cancel stopped the stream. Your inputs are intact."}</div>
+      <div class="meta sheet-meta">RESUME BUILDER<br>${isErr ? "RUN FAILED" : "RUN INTERRUPTED"}</div>
+    </div>
+    <div class="display-line">${isErr ? "Something <em>broke.</em>" : "Paused, <em>not lost.</em>"}</div>
+    <ul class="progress-log">${s.log.slice(-14).map((l) => `<li class="${esc(l.kind || "")}">${esc(l.text)}</li>`).join("")}</ul>
+    <div class="btn-row">
+      <button class="btn primary" id="x-retry">Run again</button>
+      <button class="btn ghost" id="x-edit">Edit brief</button>
+      ${s.result ? `<button class="btn ghost" id="x-view">View last result</button>` : ""}
+    </div>
+  </div>`;
+  $("x-retry").addEventListener("click", () => startRun(s));
+  $("x-edit").addEventListener("click", () => { s.status = "draft"; save(true); renderAll(); });
+  const v = $("x-view");
+  if (v) v.addEventListener("click", () => { s.status = "done"; save(true); renderAll(); });
+}
+
+/* ══ Run engine ════════════════════════════════════════════════════ */
+
+function pushLog(s, text, kind = "") {
+  s.log.push({ text, kind });
+
+}
+
+async function startRun(s) {
+  if (!state.profile) return formError("Add your dossier first (left rail → Edit dossier).");
+  const jd = (s.jd || "").trim();
+  if (!jd) return formError("Paste the job description first.");
+  if (s.status === "running") return;
+
+  const form = new FormData();
+  form.append("job_description", jd);
+  form.append("aggressiveness", String(s.aggressiveness));
+  form.append("template_id", s.templateId);
+  if (state.settings.apiKey) form.append("api_key", state.settings.apiKey);
+  if (state.profile.kind === "file") {
+    form.append("dump", b64ToFile(state.profile.fileB64, state.profile.filename, state.profile.fileType));
+  } else {
+    form.append("dump_text", state.profile.text);
+  }
+  if (s.customTemplate) {
+    form.append("custom_template", new File([s.customTemplate.text], s.customTemplate.name, { type: "text/x-tex" }));
+  }
+
+  s.status = "running"; s.progress = 1; s.log = []; s.thinking = ""; s.phase = "analyze"; s.writingSection = "";
+  s.updatedAt = Date.now();
+  pushLog(s, "Starting agent run...");
+  save(true); renderAll();
+
+  const controller = new AbortController();
+  state.runs.set(s.id, { controller });
+
+  try {
+    const res = await fetch("/api/tailor/stream", { method: "POST", body: form, signal: controller.signal });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `Request failed (${res.status})`);
     }
-
-    const validCount = bullets.filter(b => b.is_valid_length && b.has_quantification).length;
-    const invalidCount = bullets.length - validCount;
-
-    validStat.textContent = `${validCount} valid`;
-    invalidStat.textContent = `${invalidCount} issues`;
-
-    container.innerHTML = bullets.map((bullet, index) => {
-        const isValid = bullet.is_valid_length && bullet.has_quantification;
-
-        return `
-            <div class="bullet-card ${isValid ? 'valid' : 'invalid'}">
-                <div class="bullet-text">${escapeHtml(bullet.text)}</div>
-                <div class="bullet-meta">
-                    <div class="bullet-meta-item">
-                        Words: <span class="value ${bullet.is_valid_length ? 'good' : 'bad'}">${bullet.word_count}</span>
-                        <span class="hint">(24-28)</span>
-                    </div>
-                    <div class="bullet-meta-item">
-                        Verb: <span class="value">${bullet.action_verb || 'None'}</span>
-                    </div>
-                    <div class="bullet-meta-item">
-                        Quant: <span class="value ${bullet.has_quantification ? 'good' : 'bad'}">${bullet.has_quantification ? 'Yes' : 'No'}</span>
-                    </div>
-                    ${bullet.keywords_found && bullet.keywords_found.length > 0 ? `
-                        <div class="bullet-meta-item">
-                            Keywords: <span class="value good">${bullet.keywords_found.length}</span>
-                        </div>
-                    ` : ''}
-                    <button class="bullet-edit-btn" onclick="openEditModal(${index})">Edit</button>
-                </div>
-            </div>
-        `;
-    }).join('');
-}
-
-function openEditModal(bulletIndex) {
-    const bullet = currentValidation.bullet_analyses[bulletIndex];
-    if (!bullet) return;
-
-    const modal = document.getElementById('edit-modal');
-    const originalText = document.getElementById('edit-original-text');
-    const newText = document.getElementById('edit-new-text');
-
-    originalText.textContent = bullet.text;
-    newText.value = bullet.text;
-    newText.dataset.bulletIndex = bulletIndex;
-
-    updateEditStats();
-    modal.classList.remove('hidden');
-}
-
-function updateEditStats() {
-    const newText = document.getElementById('edit-new-text');
-    const wordCount = document.getElementById('edit-word-count');
-    const quantStatus = document.getElementById('edit-quant-status');
-
-    const text = newText.value.trim();
-    const words = text.split(/\s+/).filter(w => w.length > 0).length;
-    const hasQuant = /\d+%?|\$[\d,]+|[\d,]+\+?/.test(text);
-
-    wordCount.textContent = `${words} words`;
-    wordCount.className = (words >= 24 && words <= 28) ? 'valid' : 'invalid';
-
-    quantStatus.textContent = hasQuant ? 'Has quantification' : 'No quantification';
-    quantStatus.className = hasQuant ? 'valid' : 'invalid';
-}
-
-async function saveBulletEdit() {
-    const newText = document.getElementById('edit-new-text');
-    const bulletIndex = parseInt(newText.dataset.bulletIndex);
-    const originalBullet = currentValidation.bullet_analyses[bulletIndex].text;
-    const newBullet = newText.value.trim();
-
-    if (newBullet === originalBullet) {
-        document.getElementById('edit-modal').classList.add('hidden');
-        return;
+    await readSSE(res.body, (u) => handleRunUpdate(s, u));
+    if (s.status === "running") { // stream ended without a result
+      s.status = "error"; pushLog(s, "The stream ended unexpectedly — try again.", "error");
     }
+  } catch (err) {
+    if (err.name !== "AbortError" && !state.unloading) {
+      s.status = "error"; pushLog(s, `Error: ${err.message}`, "error");
+    }
+  } finally {
+    state.runs.delete(s.id);
+    save(true);
+    renderRail();
+    if (s.id === state.activeId) renderDesk();
+  }
+}
 
-    showLoading(true, 'Saving bullet edit...', 0);
+function stopRun(id) {
+  const run = state.runs.get(id);
+  if (run) { run.controller.abort(); state.runs.delete(id); }
+}
 
-    try {
-        const response = await fetch('/api/edit-bullet', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                latex_content: currentLatex,
-                old_bullet: originalBullet,
-                new_bullet: newBullet
-            })
-        });
+function handleRunUpdate(s, u) {
+  const isActive = s.id === state.activeId && s.status === "running";
 
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.detail || 'Failed to save edit');
+  if (u.step === "live") {
+    if (u.event === "thinking") {
+      s.thinking += u.text;
+      s.phase = u.phase;
+      if (isActive) {
+        const el = $("r-think");
+        if (el) {
+          const stick = atBottom(el);
+          el.textContent = s.thinking;
+          el.classList.remove("placeholder");
+          if (stick) el.scrollTop = el.scrollHeight;
         }
-
-        const data = await response.json();
-
-        currentLatex = data.updated_latex;
-        document.getElementById('latex-code').textContent = currentLatex;
-
-        if (data.bullet_analysis) {
-            currentValidation.bullet_analyses[bulletIndex] = {
-                ...currentValidation.bullet_analyses[bulletIndex],
-                text: newBullet,
-                word_count: data.bullet_analysis.word_count,
-                has_quantification: data.bullet_analysis.has_quantification,
-                is_valid_length: data.bullet_analysis.is_valid_length,
-                action_verb: data.bullet_analysis.action_verb
-            };
-            displayBulletAnalysis(currentValidation.bullet_analyses);
-        }
-
-        document.getElementById('edit-modal').classList.add('hidden');
-
-    } catch (error) {
-        showError(error.message);
-    } finally {
-        showLoading(false);
+        setPhaseChip(u.phase);
+      }
+    } else if (u.event === "writing") {
+      s.phase = u.phase;
+      if (u.section) s.writingSection = u.section;
+      if (isActive) {
+        const w = $("r-writing");
+        if (w) w.textContent = s.writingSection ? `WRITING: ${s.writingSection.toUpperCase()} · ${u.chars} CHARS` : `${u.chars} CHARS`;
+        setPhaseChip(u.phase);
+      }
     }
+    save();
+    return;
+  }
+
+  if (u.progress != null) {
+    s.progress = u.progress;
+    if (isActive) { const b = $("r-bar"); if (b) b.style.width = `${u.progress}%`; }
+  }
+  if (u.phase) { s.phase = u.phase; if (isActive) setPhaseChip(u.phase); }
+
+  switch (u.step) {
+    case "error":
+      s.status = "error"; pushLog(s, u.message, "error");
+      save(true); renderRail(); if (s.id === state.activeId) renderDesk();
+      return;
+    case "analyzed":
+      s.jdAnalysis = u.data;
+      if (!s.nameSetByUser) {
+        s.name = roleNameFrom(u.data) || s.name;
+        renderRail();
+        const title = document.querySelector(".display-line");
+        if (isActive && title) title.innerHTML = `Building <em>${esc(s.name)}.</em>`;
+      }
+      pushLog(s, u.message);
+      save();
+      if (isActive) { const p = $("r-keywords"); if (p) p.innerHTML = keywordPanel(s); }
+      return;
+    case "planned":
+      s.coveragePlan = u.data;
+      pushLog(s, u.message);
+      save();
+      if (isActive) { const p = $("r-keywords"); if (p) p.innerHTML = keywordPanel(s); }
+      return;
+    case "compiled":
+      if (u.data?.pages) s.pages = u.data.pages;
+      if (isActive) refreshStats(s);
+      s.lastCompiledPages = u.data?.pages || null;
+      pushLog(s, u.message, u.data?.compile_ok === false || (u.data?.pages > 1) ? "error" : "");
+      break;
+    case "lens_done":
+      pushLog(s, u.message);
+      break;
+    case "degraded":
+      pushLog(s, u.message, "error");
+      break;
+    case "evaluated": {
+      const d = u.data;
+      if (d.local_checks) s.liveChecks = d.local_checks;
+      s.passes = s.passes || [];
+      s.passes.push({
+        iteration: u.iteration, total: d.total, verdict: d.verdict,
+        scores: d.scores, issues: d.issues || [],
+        pages: d.local_checks?.pages ?? s.lastCompiledPages ?? null,
+      });
+      pushLog(s, `Pass ${u.iteration}: ${d.total}/100 — ${d.verdict === "pass" ? "passed" : `${d.issues.length} issue(s) to fix`}`,
+        d.verdict === "pass" ? "good" : "");
+      if (isActive) {
+        const kp = $("r-keywords"); if (kp) kp.innerHTML = keywordPanel(s);
+        const pp = $("r-passes"); if (pp) pp.innerHTML = passPanel(s);
+        refreshStats(s);
+      }
+      break;
+    }
+    case "result":
+      s.result = u.result; s.status = "done"; s.chat = [];
+      s.revisions = [{ latex: u.result.latex, label: "Generated", at: Date.now() }];
+      s.viewRev = 0;
+      if (!s.nameSetByUser) s.name = roleNameFrom(u.result.jd_analysis) || s.name;
+      pushLog(s, u.message, "good");
+      save(true); renderRail(); if (s.id === state.activeId) renderDesk();
+      return;
+    default:
+      if (u.message) pushLog(s, u.message);
+  }
+  save();
+  if (isActive) {
+    const log = $("r-log");
+    if (log) {
+      const stick = atBottom(log);
+      log.innerHTML = s.log.map((l) => `<li class="${esc(l.kind || "")}">${esc(l.text)}</li>`).join("");
+      if (stick) log.scrollTop = log.scrollHeight;
+    }
+  }
 }
 
-async function checkCompilation(latex) {
-    const compileStatus = document.getElementById('compile-status');
-    const compileIcon = document.getElementById('compile-icon');
-    const compileText = document.getElementById('compile-text');
-    const compileDetails = document.getElementById('compile-details');
-
-    compileStatus.classList.remove('hidden', 'success', 'error');
-    compileIcon.textContent = '⏳';
-    compileText.textContent = 'Checking LaTeX compilation...';
-    compileDetails.textContent = '';
-
-    try {
-        const formData = new FormData();
-        formData.append('latex_content', latex);
-
-        const response = await fetch('/api/compile-check', {
-            method: 'POST',
-            body: formData
-        });
-
-        const data = await response.json();
-
-        if (data.success) {
-            compileStatus.classList.add('success');
-            compileIcon.textContent = '✓';
-            compileText.textContent = 'LaTeX compiles successfully';
-            compileDetails.textContent = data.is_one_page
-                ? 'Output: 1 page (perfect!)'
-                : `Output: ${data.pages} pages (consider reducing content)`;
-        } else {
-            compileStatus.classList.add('error');
-            compileIcon.textContent = '✗';
-            compileText.textContent = 'LaTeX compilation failed';
-            compileDetails.textContent = data.errors || 'Unknown error';
-        }
-    } catch (error) {
-        compileStatus.classList.add('error');
-        compileIcon.textContent = '✗';
-        compileText.textContent = 'Could not check compilation';
-        compileDetails.textContent = error.message;
-    }
+function refreshStats(s) {
+  const el = $("r-stats");
+  if (!el) return;
+  const lc = s.liveChecks || {};
+  el.innerHTML = statRow(s, (s.passes || [])[s.passes.length - 1], (lc.keywords || {}).must_have, s.pages);
 }
 
-async function exportPDF() {
-    const latex = document.getElementById('latex-code').textContent;
-    if (!latex) {
-        showError('No LaTeX content to export');
-        return;
-    }
-
-    showLoading(true, 'Generating PDF (this may take a moment)...', 0);
-
-    try {
-        const formData = new FormData();
-        formData.append('latex_content', latex);
-
-        const response = await fetch('/api/export/pdf', {
-            method: 'POST',
-            body: formData
-        });
-
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.detail || 'Failed to generate PDF');
-        }
-
-        const blob = await response.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'tailored_resume.pdf';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-
-    } catch (error) {
-        // Offer .tex download as fallback
-        const shouldDownloadTex = confirm(
-            `PDF generation failed: ${error.message}\n\n` +
-            `Would you like to download the .tex file instead?\n` +
-            `You can compile it using Overleaf.com or a local LaTeX installation.`
-        );
-        if (shouldDownloadTex) {
-            downloadFile('tailored_resume.tex', latex);
-        }
-    } finally {
-        showLoading(false);
-    }
+function setPhaseChip(phase) {
+  document.querySelectorAll(".phase-chip").forEach((c) => c.classList.toggle("on", c.dataset.phase === phase));
 }
 
-async function exportTXT() {
-    const latex = document.getElementById('latex-code').textContent;
-    if (!latex) {
-        showError('No content to export');
-        return;
+async function readSSE(body, onEvent) {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const parts = buffer.split("\n\n");
+    buffer = parts.pop();
+    for (const part of parts) {
+      const line = part.trim();
+      if (line.startsWith("data: ")) onEvent(JSON.parse(line.slice(6)));
     }
-
-    showLoading(true, 'Converting to plain text...', 0);
-
-    try {
-        const formData = new FormData();
-        formData.append('latex_content', latex);
-
-        const response = await fetch('/api/export/txt', {
-            method: 'POST',
-            body: formData
-        });
-
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.detail || 'Failed to convert to text');
-        }
-
-        const data = await response.json();
-        downloadFile(data.filename, data.content);
-
-    } catch (error) {
-        showError(error.message);
-    } finally {
-        showLoading(false);
-    }
+  }
 }
 
-function generateMatchReport(data) {
-    let report = `# Resume Tailoring Report\n\n`;
-    report += `## Keyword Coverage: ${data.keyword_coverage}%\n\n`;
+const tail = (str, n) => (str && str.length > n ? str.slice(str.length - n) : str || "");
+const atBottom = (el) => !el || el.scrollHeight - el.scrollTop - el.clientHeight < 40;
 
-    report += `### Matched Keywords (${data.matched_keywords.length})\n`;
-    report += data.matched_keywords.map(k => `- ${k}`).join('\n') + '\n\n';
-
-    report += `### Missing Keywords (${data.missing_keywords.length})\n`;
-    report += data.missing_keywords.map(k => `- ${k}`).join('\n') + '\n\n';
-
-    if (data.validation) {
-        report += `## Validation Results\n\n`;
-        report += `- Total Bullets: ${data.validation.total_bullets}\n`;
-        report += `- Invalid Length: ${data.validation.bullets_wrong_length}\n`;
-        report += `- Missing Quantification: ${data.validation.bullets_no_quantification}\n`;
-        report += `- Repeated Verbs: ${data.validation.repeated_verbs.join(', ') || 'None'}\n\n`;
-    }
-
-    if (data.suggestions && data.suggestions.length > 0) {
-        report += `## Suggestions\n\n`;
-        report += data.suggestions.map(s => `- ${s}`).join('\n') + '\n';
-    }
-
-    return report;
+function roleNameFrom(jd) {
+  if (!jd) return "";
+  const role = (jd.role_title || "").trim();
+  const company = (jd.company || "").trim();
+  if (role && company) return `${role} — ${company}`;
+  return role || company || "";
 }
 
-function showLoading(show, text = 'Processing...', progress = 0) {
-    const loading = document.getElementById('loading');
-    const loadingText = document.getElementById('loading-text');
-    const buttons = document.querySelectorAll('.btn');
+/* ══ Chat editing ══════════════════════════════════════════════════ */
 
-    if (show) {
-        let displayText = text;
-        if (progress > 0) {
-            displayText = `${text} (${progress}%)`;
-        }
-        loadingText.textContent = displayText;
-        loading.classList.remove('hidden');
-        buttons.forEach(btn => btn.disabled = true);
-    } else {
-        loading.classList.add('hidden');
-        buttons.forEach(btn => btn.disabled = false);
-    }
-}
+async function sendEdit(s) {
+  const input = $("d-chat-input");
+  const instruction = input.value.trim();
+  if (!instruction || s.editing) return;
+  s.editing = true;
+  s.chat.push({ role: "user", content: instruction });
+  input.value = "";
+  $("d-chat").insertAdjacentHTML("beforeend", chatBubble("user", instruction));
+  const live = $("d-chat-live"); live.hidden = false;
+  const think = $("d-chat-think"); think.textContent = "";
+  $("d-chat-send").disabled = true;
+  $("d-chat").scrollTop = $("d-chat").scrollHeight;
 
-function showError(message) {
-    const errorEl = document.getElementById('error-message');
-    const errorText = document.getElementById('error-text');
-    errorText.textContent = message;
-    errorEl.classList.remove('hidden');
-}
-
-function hideError() {
-    document.getElementById('error-message').classList.add('hidden');
-}
-
-function copyToClipboard(text, label) {
-    navigator.clipboard.writeText(text).then(() => {
-        const btn = label === 'LaTeX' ? document.getElementById('copy-latex') : document.getElementById('copy-report');
-        const originalText = btn.textContent;
-        btn.textContent = '✓ Copied!';
-        setTimeout(() => {
-            btn.textContent = originalText;
-        }, 2000);
-    }).catch(err => {
-        console.error('Failed to copy:', err);
-        showError('Failed to copy to clipboard');
+  try {
+    const res = await fetch("/api/edit/stream", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        latex: latestLatex(s),
+        instruction,
+        history: s.chat.slice(0, -1).slice(-10),
+        job_description: (s.jd || "").slice(0, 6000),
+        api_key: state.settings.apiKey || "",
+      }),
     });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `Edit failed (${res.status})`);
+    }
+    let result = null;
+    await readSSE(res.body, (u) => {
+      if (u.step === "live" && u.event === "thinking") {
+        think.textContent = tail(think.textContent + u.text, 900);
+        think.scrollTop = think.scrollHeight;
+      } else if (u.step === "result") result = u.result;
+      else if (u.step === "error") throw new Error(u.message);
+    });
+    if (!result) throw new Error("The edit stream ended unexpectedly.");
+    if (result.changed) {
+      s.revisions = s.revisions || [{ latex: s.result.latex, label: "Generated", at: Date.now() }];
+      s.revisions.push({ latex: result.latex, label: instruction.slice(0, 80), at: Date.now() });
+      s.viewRev = s.revisions.length - 1;
+      s.result.latex = result.latex;
+    }
+    s.chat.push({ role: "assistant", content: result.reply });
+  } catch (err) {
+    s.chat.push({ role: "assistant", content: `That edit failed: ${err.message}` });
+  } finally {
+    s.editing = false;
+    save(true);
+    if (s.id === state.activeId && s.status === "done") renderDesk();
+  }
 }
 
-function downloadFile(filename, content) {
-    const blob = new Blob([content], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+/* ══ PDF preview (compile once per version, cache the bytes) ═══════ */
+
+const pdfCache = new Map(); // sessionId -> { key, blobUrl, blob }
+
+const latexKey = (latex) => {
+  let h = 0;
+  for (let i = 0; i < latex.length; i++) h = (h * 31 + latex.charCodeAt(i)) | 0;
+  return `${latex.length}:${h}`;
+};
+
+function toggleTab(s) {
+  const isTex = s.viewTab === "tex";
+  $("d-latex").hidden = !isTex;
+  $("d-pdf-view").hidden = isTex;
+  $("d-tab-pdf").classList.toggle("on", !isTex);
+  $("d-tab-tex").classList.toggle("on", isTex);
+  if (!isTex) showPdfPreview(s);
 }
 
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+async function compilePdf(s) {
+  const key = latexKey(currentLatex(s));
+  const cached = pdfCache.get(s.id);
+  if (cached && cached.key === key) return cached;
+  const form = new FormData();
+  form.append("latex_content", currentLatex(s));
+  const res = await fetch("/api/export/pdf", { method: "POST", body: form });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "PDF compilation failed");
+  }
+  const blob = await res.blob();
+  if (cached?.blobUrl) URL.revokeObjectURL(cached.blobUrl);
+  const entry = { key, blob, blobUrl: URL.createObjectURL(blob) };
+  pdfCache.set(s.id, entry);
+  const pages = parseInt(res.headers.get("X-Page-Count") || "", 10);
+  if (pages) {
+    s.pages = pages;
+    save();
+    const badge = $("d-pages");
+    if (badge) {
+      badge.textContent = `${pages} PAGE${pages > 1 ? "S ⚠" : ""}`;
+      badge.classList.toggle("over", pages > 1);
+    }
+  }
+  return entry;
 }
 
-function markdownToHtml(markdown) {
-    return markdown
-        .replace(/^### (.*$)/gim, '<h3>$1</h3>')
-        .replace(/^## (.*$)/gim, '<h2>$1</h2>')
-        .replace(/^# (.*$)/gim, '<h1>$1</h1>')
-        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-        .replace(/\*([^*]+)\*/g, '<em>$1</em>')
-        .replace(/_([^_]+)_/g, '<em>$1</em>')
-        .replace(/^\- (.*$)/gim, '<li>$1</li>')
-        .replace(/^---$/gim, '<hr>')
-        .replace(/\n\n/g, '</p><p>')
-        .replace(/\n/g, '<br>');
+async function showPdfPreview(s) {
+  const view = $("d-pdf-view");
+  if (!view) return;
+  const key = latexKey(currentLatex(s));
+  const cached = pdfCache.get(s.id);
+  if (cached && cached.key === key && view.dataset.key === key) return; // already showing
+  view.dataset.key = "";
+  view.innerHTML = `<div class="compiling"><span class="meta">COMPILING PLATE…</span></div>`;
+  try {
+    const entry = await compilePdf(s);
+    if (s.id !== state.activeId || s.status !== "done") return; // user moved on
+    view.innerHTML = `<iframe class="pdf-frame" title="Resume preview" src="${entry.blobUrl}#toolbar=0&navpanes=0&view=FitH"></iframe>`;
+    view.dataset.key = entry.key;
+  } catch (err) {
+    view.innerHTML = `<div class="compiling"><span class="meta warn-text">PREVIEW FAILED</span>
+      <span class="caption">${esc(err.message)} — showing the source instead.</span></div>`;
+    setTimeout(() => { if (s.id === state.activeId && s.status === "done") { s.viewTab = "tex"; toggleTab(s); } }, 1600);
+  }
 }
+
+async function savePdf(s, btn) {
+  const original = btn.textContent;
+  btn.disabled = true; btn.textContent = "…";
+  try {
+    const entry = await compilePdf(s); // cached — no recompile if already previewed
+    const n = revIndex(s) + 1;
+    saveBlob(entry.blob, `resume-r${n}.pdf`);
+  } catch (err) { alert(err.message); }
+  btn.disabled = false; btn.textContent = original;
+}
+
+/* ══ Exports ═══════════════════════════════════════════════════════ */
+
+/* Downloads need the anchor attached to the document, and the object URL must
+   outlive the click — revoking immediately cancels the download in some browsers. */
+function saveBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.rel = "noopener";
+  a.style.display = "none";
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { a.remove(); URL.revokeObjectURL(url); }, 20000);
+}
+
+async function download(s, endpoint, filename, btn) {
+  const original = btn.textContent;
+  btn.disabled = true; btn.textContent = "…";
+  try {
+    const form = new FormData();
+    form.append("latex_content", currentLatex(s));
+    const res = await fetch(endpoint, { method: "POST", body: form });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || "Export failed");
+    }
+    const blob = await res.blob();
+    saveBlob(blob, filename);
+  } catch (err) { alert(err.message); }
+  btn.disabled = false; btn.textContent = original;
+}
+
+/* ══ Dossier modal ═════════════════════════════════════════════════ */
+
+let pendingFile = null;
+
+function openProfile() {
+  const m = $("profile-modal");
+  pendingFile = null;
+  const dzIdle = m.querySelector(".dz-idle"), dzFile = m.querySelector(".dz-file");
+  if (state.profile?.kind === "file") {
+    dzIdle.hidden = true; dzFile.hidden = false;
+    $("dump-filename").textContent = state.profile.filename;
+  } else {
+    dzIdle.hidden = false; dzFile.hidden = true;
+  }
+  if (state.profile?.kind === "text") {
+    $("dump-text").hidden = false;
+    $("dump-text").value = state.profile.text;
+  }
+  m.showModal();
+}
+
+$("profile-btn").addEventListener("click", openProfile);
+$("profile-close").addEventListener("click", () => $("profile-modal").close());
+$("browse-btn").addEventListener("click", () => $("dump-file").click());
+$("dump-file").addEventListener("change", (e) => e.target.files[0] && stageFile(e.target.files[0]));
+$("clear-file").addEventListener("click", () => {
+  pendingFile = null; state.profile = null; saveProfile();
+  $("profile-modal").querySelector(".dz-idle").hidden = false;
+  $("profile-modal").querySelector(".dz-file").hidden = true;
+  renderRail();
+});
+$("toggle-paste").addEventListener("click", () => {
+  const ta = $("dump-text"); ta.hidden = !ta.hidden;
+});
+
+const dz = $("dropzone");
+["dragover", "dragenter"].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.add("dragging"); }));
+["dragleave", "drop"].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.remove("dragging"); }));
+dz.addEventListener("drop", (e) => e.dataTransfer.files[0] && stageFile(e.dataTransfer.files[0]));
+
+function stageFile(file) {
+  if (file.size > 4 * 1024 * 1024) return alert("Keep the file under 4MB — export a lighter PDF or paste the text.");
+  pendingFile = file;
+  $("profile-modal").querySelector(".dz-idle").hidden = true;
+  $("profile-modal").querySelector(".dz-file").hidden = false;
+  $("dump-filename").textContent = file.name;
+}
+
+$("profile-save").addEventListener("click", async () => {
+  if (pendingFile) {
+    const b64 = await fileToB64(pendingFile);
+    state.profile = { kind: "file", filename: pendingFile.name, fileB64: b64, fileType: pendingFile.type || "application/octet-stream" };
+  } else if (!$("dump-text").hidden && $("dump-text").value.trim()) {
+    state.profile = { kind: "text", filename: "", text: $("dump-text").value };
+  } else if (!state.profile) {
+    return alert("Add a file or paste text first.");
+  }
+  saveProfile(); renderRail();
+  $("profile-modal").close();
+});
+
+const fileToB64 = (file) => new Promise((resolve, reject) => {
+  const r = new FileReader();
+  r.onload = () => resolve(r.result.split(",")[1]);
+  r.onerror = reject;
+  r.readAsDataURL(file);
+});
+
+function b64ToFile(b64, filename, type) {
+  const bytes = atob(b64);
+  const arr = new Uint8Array(bytes.length);
+  for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+  return new File([arr], filename, { type });
+}
+
+/* ══ Settings modal ════════════════════════════════════════════════ */
+
+$("settings-btn").addEventListener("click", () => {
+  $("api-key-input").value = state.settings.apiKey || "";
+  $("settings-modal").showModal();
+});
+$("settings-close").addEventListener("click", () => $("settings-modal").close());
+$("settings-save").addEventListener("click", () => {
+  state.settings.apiKey = $("api-key-input").value.trim();
+  saveSettings();
+  $("settings-modal").close();
+});
+
+/* ══ Boot ══════════════════════════════════════════════════════════ */
+
+async function boot() {
+  loadState();
+  try {
+    const res = await fetch("/api/templates");
+    state.templates = (await res.json()).templates;
+  } catch { state.templates = [{ id: "udaya", name: "Udaya's Template", description: "Default", default: true }]; }
+  renderAll();
+  if (!state.profile) setTimeout(openProfile, 400);
+}
+
+boot();

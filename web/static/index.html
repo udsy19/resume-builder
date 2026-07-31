@@ -1,331 +1,85 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ATS Resume Builder - AI Powered</title>
-    <link rel="stylesheet" href="/static/styles.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Resume Builder — ATS-perfect resumes, recursively evaluated</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist+Mono:wght@400;500&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1>ATS Resume Builder</h1>
-            <p class="subtitle">AI-powered resume tailoring for maximum ATS match</p>
-            <div id="ai-status" class="ai-badge">
-                <span class="dot"></span>
-                <span>Checking AI status...</span>
-            </div>
-        </header>
+<div class="app">
 
-        <main>
-            <div class="input-section">
-                <div class="panel">
-                    <h2>Your Resume (LaTeX)</h2>
-                    <div class="input-options">
-                        <button class="tab-btn active" data-tab="resume-paste">Paste</button>
-                        <button class="tab-btn" data-tab="resume-upload">Upload</button>
-                    </div>
-                    <div id="resume-paste" class="tab-content active">
-                        <textarea id="resume-input" placeholder="Paste your LaTeX resume here..."></textarea>
-                    </div>
-                    <div id="resume-upload" class="tab-content">
-                        <div class="file-upload">
-                            <input type="file" id="resume-file" accept=".tex,.txt">
-                            <label for="resume-file">
-                                <span class="upload-icon">+</span>
-                                <span>Choose .tex file</span>
-                            </label>
-                            <span id="resume-filename" class="filename"></span>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="panel">
-                    <h2>Job Description</h2>
-                    <div class="input-options">
-                        <button class="tab-btn active" data-tab="job-paste">Paste</button>
-                        <button class="tab-btn" data-tab="job-upload">Upload</button>
-                        <button class="tab-btn" data-tab="job-url">Import URL</button>
-                    </div>
-                    <div id="job-paste" class="tab-content active">
-                        <textarea id="job-input" placeholder="Paste the full job description here..."></textarea>
-                    </div>
-                    <div id="job-upload" class="tab-content">
-                        <div class="file-upload">
-                            <input type="file" id="job-file" accept=".txt,.md">
-                            <label for="job-file">
-                                <span class="upload-icon">+</span>
-                                <span>Choose .txt file</span>
-                            </label>
-                            <span id="job-filename" class="filename"></span>
-                        </div>
-                    </div>
-                    <div id="job-url" class="tab-content">
-                        <div class="url-import">
-                            <input type="url" id="job-url-input" placeholder="https://linkedin.com/jobs/... or greenhouse.io/...">
-                            <button id="import-url-btn" class="btn btn-secondary">Import</button>
-                        </div>
-                        <p class="url-hint">Supports LinkedIn, Greenhouse, Lever, and most job boards</p>
-                    </div>
-                </div>
-            </div>
-
-            <div class="options-section">
-                <div class="option">
-                    <label for="max-experiences">Max Experiences:</label>
-                    <input type="number" id="max-experiences" value="4" min="1" max="10">
-                </div>
-                <div class="option">
-                    <label for="max-bullets">Max Bullets per Entry:</label>
-                    <input type="number" id="max-bullets" value="4" min="1" max="8">
-                </div>
-            </div>
-
-            <div class="action-section">
-                <button id="analyze-btn" class="btn btn-secondary">Analyze Job (AI)</button>
-                <button id="tailor-btn" class="btn btn-primary">
-                    <span class="btn-icon-ai">✨</span>
-                    Generate Tailored Resume
-                </button>
-            </div>
-
-            <div id="loading" class="loading hidden">
-                <div class="spinner"></div>
-                <span id="loading-text">AI is analyzing and tailoring your resume...</span>
-            </div>
-
-            <div id="error-message" class="error-card hidden">
-                <h3>Error</h3>
-                <p id="error-text"></p>
-            </div>
-
-            <div id="job-analysis" class="job-analysis hidden">
-                <h3>
-                    <span class="section-icon">🎯</span>
-                    Job Analysis
-                    <span id="job-title" class="job-title-badge"></span>
-                </h3>
-                <div class="analysis-grid">
-                    <div class="analysis-card required">
-                        <h4>Required Skills</h4>
-                        <div id="required-skills" class="keyword-tags"></div>
-                    </div>
-                    <div class="analysis-card preferred">
-                        <h4>Preferred Skills</h4>
-                        <div id="preferred-skills" class="keyword-tags"></div>
-                    </div>
-                    <div class="analysis-card tech">
-                        <h4>Technologies</h4>
-                        <div id="tech-skills" class="keyword-tags"></div>
-                    </div>
-                    <div class="analysis-card verbs">
-                        <h4>Action Verbs to Use</h4>
-                        <div id="action-verbs" class="keyword-tags"></div>
-                    </div>
-                </div>
-                <div id="responsibilities-section" class="responsibilities-section hidden">
-                    <h4>Key Responsibilities</h4>
-                    <ul id="responsibilities-list"></ul>
-                </div>
-            </div>
-
-            <div id="results" class="results-section hidden">
-                <div class="results-header">
-                    <h3>
-                        <span class="section-icon">✨</span>
-                        AI-Tailored Resume
-                    </h3>
-                    <div class="passes-badge" id="passes-badge"></div>
-                </div>
-
-                <!-- Validation Status -->
-                <div id="validation-status" class="validation-status">
-                    <div class="validation-header">
-                        <h4>Resume Validation</h4>
-                        <span id="validation-badge" class="validation-badge">Checking...</span>
-                    </div>
-                    <div class="validation-grid">
-                        <div class="validation-item">
-                            <span class="validation-label">Total Bullets</span>
-                            <span id="total-bullets" class="validation-value">-</span>
-                        </div>
-                        <div class="validation-item">
-                            <span class="validation-label">Invalid Length</span>
-                            <span id="bullets-wrong-length" class="validation-value">-</span>
-                        </div>
-                        <div class="validation-item">
-                            <span class="validation-label">Missing Quantification</span>
-                            <span id="bullets-no-quant" class="validation-value">-</span>
-                        </div>
-                        <div class="validation-item">
-                            <span class="validation-label">Repeated Verbs</span>
-                            <span id="repeated-verbs-count" class="validation-value">-</span>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Score and Keywords -->
-                <div class="score-keywords-row">
-                    <div class="score-card">
-                        <div class="score-circle">
-                            <svg viewBox="0 0 36 36">
-                                <path class="score-bg"
-                                    d="M18 2.0845
-                                       a 15.9155 15.9155 0 0 1 0 31.831
-                                       a 15.9155 15.9155 0 0 1 0 -31.831"
-                                    fill="none"
-                                    stroke="#eee"
-                                    stroke-width="3"/>
-                                <path id="score-progress"
-                                    class="score-fill"
-                                    d="M18 2.0845
-                                       a 15.9155 15.9155 0 0 1 0 31.831
-                                       a 15.9155 15.9155 0 0 1 0 -31.831"
-                                    fill="none"
-                                    stroke="#4CAF50"
-                                    stroke-width="3"
-                                    stroke-dasharray="0, 100"/>
-                            </svg>
-                            <span id="score-value" class="score-text">0%</span>
-                        </div>
-                        <div class="score-label">Keyword Match</div>
-                    </div>
-
-                    <!-- Verb Tracker -->
-                    <div class="verb-tracker">
-                        <h4>Action Verb Usage</h4>
-                        <div id="verb-tracker-content" class="verb-tracker-content">
-                            <p class="empty-state">Generate a resume to see verb usage</p>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Keyword Checklist -->
-                <div class="keywords-section">
-                    <div class="keyword-group matched">
-                        <h3>✓ Matched Keywords <span id="matched-count" class="keyword-count"></span></h3>
-                        <div id="matched-keywords" class="keyword-tags checklist"></div>
-                    </div>
-                    <div class="keyword-group missing">
-                        <h3>✗ Missing Keywords <span id="missing-count" class="keyword-count"></span></h3>
-                        <p class="missing-note">Click keywords to add them to your checklist for manual addition.</p>
-                        <div id="missing-keywords" class="keyword-tags checklist"></div>
-                    </div>
-                </div>
-
-                <!-- Bullet Suggestions -->
-                <div id="bullet-suggestions" class="bullet-suggestions hidden">
-                    <h3>💡 Bullet Improvement Suggestions</h3>
-                    <div id="suggestions-list" class="suggestions-list"></div>
-                </div>
-
-                <!-- Output Tabs -->
-                <div class="output-tabs">
-                    <button class="output-tab active" data-output="latex">Tailored LaTeX</button>
-                    <button class="output-tab" data-output="diff">Diff View</button>
-                    <button class="output-tab" data-output="bullets">Bullet Analysis</button>
-                    <button class="output-tab" data-output="report">Match Report</button>
-                </div>
-
-                <!-- LaTeX Output -->
-                <div id="latex-output" class="output-content active">
-                    <div class="output-header">
-                        <span>tailored_resume.tex</span>
-                        <div class="output-actions">
-                            <button id="copy-latex" class="btn-icon" title="Copy to clipboard">📋 Copy</button>
-                            <button id="download-latex" class="btn-icon" title="Download .tex file">⬇ .tex</button>
-                            <button id="export-pdf" class="btn-icon" title="Export as PDF">📄 PDF</button>
-                            <button id="export-txt" class="btn-icon" title="Export as plain text">📝 TXT</button>
-                        </div>
-                    </div>
-                    <pre id="latex-code"></pre>
-                </div>
-
-                <!-- Diff View -->
-                <div id="diff-output" class="output-content">
-                    <div class="output-header">
-                        <span>Changes from Original</span>
-                        <div class="diff-legend">
-                            <span class="diff-legend-item added">+ Added</span>
-                            <span class="diff-legend-item removed">- Removed</span>
-                            <span class="diff-legend-item modified">~ Modified</span>
-                        </div>
-                    </div>
-                    <div id="diff-content" class="diff-content">
-                        <p class="empty-state">No changes to display</p>
-                    </div>
-                </div>
-
-                <!-- Bullet Analysis -->
-                <div id="bullets-output" class="output-content">
-                    <div class="output-header">
-                        <span>Bullet Point Analysis</span>
-                        <div class="bullet-stats">
-                            <span id="valid-bullets-stat">0 valid</span>
-                            <span id="invalid-bullets-stat">0 issues</span>
-                        </div>
-                    </div>
-                    <div id="bullets-analysis" class="bullets-analysis">
-                        <p class="empty-state">Generate a resume to see bullet analysis</p>
-                    </div>
-                </div>
-
-                <!-- Match Report -->
-                <div id="report-output" class="output-content">
-                    <div class="output-header">
-                        <span>match_report.md</span>
-                        <div class="output-actions">
-                            <button id="copy-report" class="btn-icon" title="Copy to clipboard">📋 Copy</button>
-                            <button id="download-report" class="btn-icon" title="Download file">⬇ Download</button>
-                        </div>
-                    </div>
-                    <div id="report-content" class="markdown-content"></div>
-                </div>
-
-                <!-- Compile Status -->
-                <div id="compile-status" class="compile-status hidden">
-                    <div class="compile-header">
-                        <span id="compile-icon">⏳</span>
-                        <span id="compile-text">Checking LaTeX compilation...</span>
-                    </div>
-                    <div id="compile-details" class="compile-details"></div>
-                </div>
-            </div>
-        </main>
-
-        <footer>
-            <p>ATS Resume Builder v3.0 - AI Powered</p>
-        </footer>
+  <!-- ══ Side panel: roles ══ -->
+  <aside class="rail">
+    <div class="rail-head">
+      <div class="wordmark">Resume<br>Builder</div>
+      <div class="meta rail-meta">TAILORING DESK<br>PLATE INDEX</div>
     </div>
 
-    <!-- Edit Modal -->
-    <div id="edit-modal" class="modal hidden">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>Edit Bullet Point</h3>
-                <button class="modal-close" id="modal-close">&times;</button>
-            </div>
-            <div class="modal-body">
-                <div class="edit-original">
-                    <label>Original:</label>
-                    <p id="edit-original-text"></p>
-                </div>
-                <div class="edit-new">
-                    <label>New Text:</label>
-                    <textarea id="edit-new-text" rows="3"></textarea>
-                </div>
-                <div class="edit-stats">
-                    <span id="edit-word-count">0 words</span>
-                    <span id="edit-quant-status">No quantification</span>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button id="edit-cancel" class="btn btn-secondary">Cancel</button>
-                <button id="edit-save" class="btn btn-primary">Save Changes</button>
-            </div>
-        </div>
-    </div>
+    <button class="btn primary block" id="new-session-btn">+ New role</button>
+    <nav id="session-list" class="session-list"></nav>
 
-    <script src="/static/app.js"></script>
+    <div class="rail-foot">
+      <div class="meta">YOUR DOSSIER</div>
+      <div id="profile-status" class="profile-status">
+        <span class="dot warn"></span> No information yet
+      </div>
+      <button class="linklike" id="profile-btn">Edit dossier</button>
+      <button class="linklike" id="settings-btn">Settings</button>
+    </div>
+  </aside>
+
+  <!-- ══ Main ══ -->
+  <main class="desk" id="desk">
+    <!-- rendered by app.js -->
+  </main>
+</div>
+
+<!-- ══ Dossier modal ══ -->
+<dialog id="profile-modal" class="modal">
+  <div class="modal-plate">
+    <div class="modal-head">
+      <span class="card-title">Your dossier</span>
+      <span class="meta">SHARED ACROSS ALL ROLES</span>
+    </div>
+    <p class="hint">One dump of everything about you — resume, projects, brags. It's reused for every role you tailor. LaTeX, PDF, Word, Markdown, or plain text.</p>
+    <div id="dropzone" class="dropzone">
+      <input type="file" id="dump-file" accept=".pdf,.docx,.tex,.md,.markdown,.txt" hidden>
+      <div class="dz-idle">
+        <strong>Drop your file here</strong> or <button type="button" class="linklike" id="browse-btn">browse</button>
+        <span class="dz-formats meta">PDF · DOCX · TEX · MD · TXT</span>
+      </div>
+      <div class="dz-file" hidden><span id="dump-filename" class="mono"></span><button type="button" class="linklike" id="clear-file">remove</button></div>
+    </div>
+    <button type="button" class="linklike" id="toggle-paste">…or paste it as text</button>
+    <textarea id="dump-text" rows="9" placeholder="Paste your resume / info dump here..." hidden></textarea>
+    <div class="modal-actions">
+      <button class="btn primary" id="profile-save">Save dossier</button>
+      <button class="btn ghost" id="profile-close">Close</button>
+    </div>
+  </div>
+</dialog>
+
+<!-- ══ Settings modal ══ -->
+<dialog id="settings-modal" class="modal">
+  <div class="modal-plate">
+    <div class="modal-head">
+      <span class="card-title">Settings</span>
+      <span class="meta">STORED IN THIS BROWSER ONLY</span>
+    </div>
+    <label class="field-label">Your Anthropic API key <span class="opt">(optional)</span></label>
+    <p class="hint">If set, your key is used and usage bills to your account. Kept in this browser's local storage — never sent anywhere except the Anthropic API via this app's backend.</p>
+    <input type="password" id="api-key-input" placeholder="sk-ant-api03-..." autocomplete="off">
+    <div class="modal-actions">
+      <button class="btn primary" id="settings-save">Save</button>
+      <button class="btn ghost" id="settings-close">Close</button>
+    </div>
+  </div>
+</dialog>
+
+<script src="/static/app.js"></script>
 </body>
 </html>

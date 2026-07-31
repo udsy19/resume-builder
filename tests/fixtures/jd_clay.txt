@@ -1,0 +1,26 @@
+Security Engineer
+Clay — New York, NY (hybrid)
+
+About the role
+Clay is a go-to-market engineering platform. As one of our first security engineers you will own the security of our product and infrastructure end to end. You will build the tooling and detection systems that keep customer data safe, and you will write production code every day.
+
+What you'll do
+- Build security tooling and automation that scales with the product, rather than manual review gates
+- Design and run detection systems for our AWS environment, including misconfiguration prevention and remediation pipelines
+- Own IAM, network policies, container security, and secrets management across our infrastructure
+- Implement least-privilege access patterns and secure-by-default patterns in our infrastructure-as-code (Terraform, AWS Config, AWS Security Hub)
+- Partner with product engineers on architecture reviews and code-level security reviews
+- Build automated code review: static analysis, dynamic analysis, and dependency checks in CI
+- Run and triage findings from pen tests and our bug bounty program
+- Improve authentication and authorization across the product
+
+What we're looking for
+- Strong software engineering fundamentals — you have shipped production systems, and you write code as your primary tool
+- Experience with cloud security (AWS preferred), container security, and Kubernetes
+- Familiarity with application security: OWASP Top 10, secure coding practices, vulnerability discovery
+- Experience with Python or Go
+- Comfort with safe deployment patterns and preventative controls
+- Cross-functional communication — you can explain risk to engineers and to leadership
+- Bonus: incident response or threat detection experience, SIEM tooling, threat hunting
+
+You own the stack. We move fast and we expect security to be an accelerant, not a gate.

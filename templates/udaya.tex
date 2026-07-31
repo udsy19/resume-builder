@@ -1,0 +1,287 @@
+\documentclass[letterpaper,1pt]{article}
+
+\usepackage{latexsym}
+\usepackage[empty]{fullpage}
+\usepackage{titlesec}
+\usepackage{marvosym}
+\usepackage[usenames,dvipsnames]{color}
+\usepackage{verbatim}
+\usepackage{enumitem}
+\usepackage{hyperref}
+% \usepackage[hidelinks]{hyperref}
+\usepackage{fancyhdr}
+\usepackage{tabularx}
+\usepackage{multicol}
+\usepackage{ragged2e}
+\usepackage[T1]{fontenc}  % Added for better font encoding
+\usepackage{microtype}    % Added for better typography
+
+% Input glyph-to-unicode mapping
+\input{glyphtounicode}
+\pdfgentounicode=1       % Enable generation of unicode mapping
+
+\pagestyle{fancy}
+\fancyhf{} % clear all header and footer fields
+\fancyfoot{}
+\renewcommand{\headrulewidth}{0pt}
+\renewcommand{\footrulewidth}{0pt}
+
+% Adjust margins
+\addtolength{\oddsidemargin}{-0.5in}
+\addtolength{\evensidemargin}{-0.5in}
+\addtolength{\textwidth}{1in}
+\addtolength{\topmargin}{-.5in}
+\addtolength{\textheight}{1.0in}
+
+\urlstyle{same}
+
+\raggedbottom
+\setlength{\tabcolsep}{0in}
+
+% Sections formatting
+\titleformat{\section}{
+  \vspace{-4pt}\scshape\raggedright\large
+}{}{0em}{}[\color{black}\titlerule \vspace{-5pt}]
+
+% Custom commands
+\newcommand{\resumeItem}[1]{
+  \item\small{
+    #1 \vspace{-2pt}
+  }
+}
+
+\newcommand{\resumeSubheading}[4]{
+  \vspace{-2pt}\item
+    \begin{tabular*}{0.97\textwidth}[t]{l@{\extracolsep{\fill}}r}
+      \textbf{#1} & \textbf{#2} \\
+      \textit{\small#3} & \textbf{\textit{\small #4}} \\
+    \end{tabular*}\vspace{-7pt}
+}
+
+\newcommand{\resumeSubItem}[1]{\resumeItem{#1}\vspace{-4pt}}
+
+\renewcommand\labelitemii{$\vcenter{\hbox{\tiny$\bullet$}}$}
+
+\newcommand{\resumeSubHeadingListStart}{\begin{itemize}[leftmargin=0.15in, label={}]}
+\newcommand{\resumeSubHeadingListEnd}{\end{itemize}}
+\newcommand{\resumeItemListStart}{\begin{itemize}}
+\newcommand{\resumeItemListEnd}{\end{itemize}\vspace{-5pt}}
+
+%-------------------------------------------
+%%%%%%  RESUME STARTS HERE  %%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{document}
+
+%----------HEADING----------
+\begin{center}
+    \textbf{\Large Udaya Vijay Anand} \\
+    West Lafayette, IN \\
+    +1 (555) 010-0199 $|$ \href{mailto:you@example.com}{you@example.com} $|$ 
+    \href{https://linkedin.com/in/udaya-vijay-anand/}{linkedin.com/in/udaya-vijay-anand}  $|$
+    \href{https://udsy.in}{udsy.in} $|$ \href{https://github.com/udsy19}{github.com/udsy19}
+\end{center}
+\vspace{-10pt}
+
+
+
+%-----------EDUCATION-----------
+\section{Education}
+  \resumeSubHeadingListStart
+    \resumeSubheading
+      {Purdue University - Main Campus}{West Lafayette, IN}
+      {B.Sc. in Cybersecurity and Computing Infrastructure and Network Engineering}{May 2026}
+      \resumeItemListStart
+        \resumeItem{Minor: Finance \hfill \textbf{GPA: 3.55}}
+        \resumeItem{Certifications: \href{https://www.credly.com/badges/8138de84-0f88-486c-9fd1-ecda2de3f1de/public_url}{Security+} (CompTIA), \href{https://www.credly.com/badges/2fb0a2d9-41c7-49d1-9e69-ca0e7270a1bd/public_url}{CSAP} (CompTIA), \href{https://www.credly.com/badges/990011a7-9044-4da3-b66b-03a785d41bb5/public_url}{CySA+} (CompTIA), \href{https://www.comptia.org/certifications/ceh}{CEH} (EC-Council), Dean's List (2022 - 2023)}        
+       % \resumeItem{Honors: Dean's List (2022 - 2023)}
+      \resumeItemListEnd
+  \resumeSubHeadingListEnd
+
+%-----------EXPERIENCE-----------
+\section{Experience}
+  \resumeSubHeadingListStart
+
+\resumeSubheading
+      {KPMG}{\textbf{Bengaluru, India}}
+      {Cyber Defence \& Incident Response (CDIR) Intern}{\textbf{Jun 2025 -- Aug 2025}}
+      \resumeItemListStart
+        \resumeItem{Engineered and led a hackathon-to-production deployment pipeline deploying Docker containerization, CI/CD automation, Prometheus monitoring stack, and observability with structured logging, attaining under \textbf{1000ms} P95 response times.}
+        \resumeItem{Performed incident response triage and malware analysis across phishing and Windows exploitation scenarios, integrating SIEM detection rules mapped to MITRE ATT\&CK improving detection coverage by \textbf{30\%}.}        \resumeItem{Architected asynchronous middleware processing \textbf{25-40} TPS with distributed caching, Redis session management, and Kubernetes-orchestrated horizontal scaling supporting \textbf{20+} concurrent WebSocket connections. Ensured high availability.}
+        \resumeItem{Developed cross-platform AI Safety Guardrails middleware leveraging React TypeScript, FastAPI microservices, and Electron containerization with multi-provider LLM orchestration across \textbf{5} APIs. Produced scalable, reliable solutions.}
+
+
+      \resumeItemListEnd
+
+
+ \resumeSubheading
+      {Purdue University}{\textbf{West Lafayette, IN}}
+      {Teaching Assistant, CNIT \textbf{176 \& 271} IT Architecture \& Cybersecurity Fundamentals II}{\textbf{Jan 2024 -- Aug 2025}}
+      \resumeItemListStart
+    \resumeItem{Facilitated innovative hands-on laboratory sessions for \textbf{75} students, developing custom network simulation exercises and distributed systems configurations enhancing practical understanding of cybersecurity fundamentals.}
+\resumeItem{Redesigned evaluation frameworks for technical assignments across \textbf{22} students, creating detailed rubrics and personalized feedback mechanisms improving average grades by \textbf{15\%}.}
+        \resumeItem{Collaborated with instructors to design materials for hardware security implementation and system hardening techniques.}
+      \resumeItemListEnd
+
+
+    \resumeSubheading
+      {DBS Bank}{\textbf{Mumbai, India}}
+      {Cybersecurity Intern}{\textbf{May 2024 -- Aug 2024}}
+      \resumeItemListStart
+        \resumeItem{Led POC implementation of Rapid7 InsightVM and Insight Agent for authenticated scans, streamlining manual vulnerability assessment to meet RBI regulations and increased detection speed by \textbf{25\%}.}
+        \resumeItem{Developed a program utilizing Openpyxl and Pandas to optimize generation of RBI-compliant reports, eliminating manual intervention and increasing efficiency by \textbf{50\%} with parallelized tasks using ThreadPool.}
+\resumeItem{Engineered a scalable Python scraper to autonomously extract data from \textbf{70k+} webpages, parsing NCIIPC-published vulnerabilities and CVE details. Incorporated anti-crawler techniques to preserve data integrity across multiple IPs.}
+        \resumeItem{Conducted monthly WiFi and Web Application security assessments using tools including BurpSuite, Nikto, and Wireshark, aligning with OWASP Top \textbf{10} standards to identify vulnerabilities across systems.}
+      \resumeItemListEnd
+
+
+
+  
+
+    
+% \resumeSubheading
+%   {ASSISTments (Worcester Polytechnic Institute)}{\textbf{Worcester, MA}}
+%   {Research Intern}{\textbf{Jan 2023 -- May 2024}}
+%   \resumeItemListStart
+%     \resumeItem{Engineered machine learning auto-grader utilizing Random Forest and SVM algorithms with feature extraction pipelines, achieving 15\% accuracy improvement and \textbf{94\%} overall grading precision milestone.}
+%     \resumeItem{Formulated cross-validation data analytics approach incorporating bias reduction techniques, resulting in \textbf{20\%} reduction in demographic grade disparities and improved assessment reliability across student populations.}
+%     \resumeItem{Collaborated with University of Colorado Boulder's PhET Interactive Simulations team to integrate 5 educational simulations into ML assessment framework, enhancing interactive STEM learning evaluation capabilities.}
+%   \resumeItemListEnd
+
+
+
+% \resumeSubheading
+%   {Hindustan Unilever}{\textbf{Vedasandur, India}}
+%   {Supervising Intern}{\textbf{May 2020 -- Jul 2020}}
+%   \resumeItemListStart
+%     \resumeItem{Spearheaded 4M framework optimization initiatives targeting dust reduction and resource wastage, implementing Lean Six Sigma principles across manufacturing processes for operational efficiency improvements.}
+%     \resumeItem{Deployed AI-assisted video analytics system for workforce movement tracking and workstation utilization analysis, generating actionable insights for resource allocation optimization and productivity enhancement.}
+%     \resumeItem{Implemented thermal screening infrastructure with real-time alerting SOPs during COVID-19 response, ensuring rapid health risk identification and workplace safety compliance across manufacturing facilities.}
+%   \resumeItemListEnd
+      
+    
+      
+  \resumeSubHeadingListEnd
+
+
+% %-----------LEADERSHIP-----------
+% \section{Leadership}
+%  \resumeSubHeadingListStart
+
+%     \resumeSubheading
+%       {Finance.Studio}{\textbf{West Lafayette, IN}}
+%       {Founder \& Technical Lead}{\textbf{2024 -- Present}}
+%       \resumeItemListStart
+%         \resumeItem{Founded AI-driven fintech initiative integrating NLP-based fundamental analysis parsing quarterly earnings reports and SEC filings with ML-powered technical trading models using XGBoost and Random Forest algorithms.}
+%         \resumeItem{Built full-stack prototype featuring FastAPI backend and React/Tailwind dashboards with trade recommendations, backtesting capabilities, and risk management modules while achieving simulated returns outperforming benchmark indices.}
+%       \resumeItemListEnd
+
+%     \resumeSubheading
+%       {Phi Gamma Nu Professional Business Fraternity}{\textbf{West Lafayette, IN}}
+%       {Finance Committee Board Member \& Head/Recruitment Chair}{\textbf{2024 -- Present}}
+%       \resumeItemListStart
+%         \resumeItem{Spearheaded comprehensive membership growth initiatives and recruitment strategy while managing chapter budgets, strategic allocations, and financial modeling for professional development events and operational programming.}
+%         \resumeItem{Orchestrated rush week logistics coordinating multi-team operations and represented chapter in strategic negotiations with university officials, alumni networks, and inter-fraternity council representatives for organizational growth.}
+%       \resumeItemListEnd
+
+
+%     \resumeSubheading
+%       {Sora Photography}{\textbf{West Lafayette, IN}}
+%       {Founder \& Brand Manager}{\textbf{2024 -- Present}}
+%       \resumeItemListStart
+%         \resumeItem{Founded independent creative brand specializing in event photography, developing end-to-end operations from client acquisition through professional delivery workflows, post-production editing, and comprehensive business management.}
+%         \resumeItem{Architected multi-platform marketing campaigns across Instagram (@thesora.io with \textbf{1000+} followers), web presence, and referral networks while establishing standardized client agreements and sustainable financial models.}
+%       \resumeItemListEnd
+
+
+%  \resumeSubHeadingListEnd
+
+%-----------PROJECTS-----------
+\section{Projects}
+ \resumeSubHeadingListStart
+
+% \resumeItem{\href{https://github.com/udsy19/instagram-security-research}{\textbf{Instagram Bug Bounty Security Research}} $|$ \textit{Platform-Level Vulnerability Discovery \& Responsible Disclosure}}
+%   \resumeItemListStart
+%     \resumeItem{Discovered platform-level account-access vulnerability affecting large user subset and architected cloud-orchestrated research pipeline performing large-scale ethical sensor testing across millions of page interactions.}
+%     \resumeItem{Generated comprehensive triage artifacts including PoC summaries and remediation timelines, coordinating with vendor security teams for verification while reducing investigation time by \textbf{60\%}.}
+%   \resumeItemListEnd
+
+% \resumeItem{\href{https://github.com/udsy19/web-automation-security}{\textbf{Web Automation \& Security Framework}} $|$ \textit{Distributed Security Validation \& Bot Detection Research}}
+%   \resumeItemListStart
+%     \resumeItem{Engineered distributed web-automation framework incorporating resilient proxy rotation, adaptive rate-limiting, centralized observability, and hybrid captcha-resolution pipeline achieving \textbf{75\%} success rate with ML classification.}
+%     \resumeItem{Implemented comprehensive monitoring, anomaly detection policies, and throttling mechanisms while preparing mitigation recommendations including CAPTCHA hardening and bot-detection signal enrichment for security validation.}
+%   \resumeItemListEnd
+
+\resumeItem{\href{https://github.com/udsy19/PrivacyLens.git}{\textbf{PrivacyLens}} $|$ \textit{Automated Confidential Data Scanner for Enterprise Assets (KPMG)}}
+  \resumeItemListStart
+    \resumeItem{Built automated Python pipeline processing \textbf{100,000} company files across documents, scripts, and spreadsheets, integrating adaptive keyword mapping and on-premises language models across \textbf{25+} file formats.}
+    \resumeItem{Established enterprise-grade compliance with high-fidelity PII detection and dynamic severity classification, generating 300+ actionable PDF and CSV reports for GRC audits reducing manual review time.}
+  \resumeItemListEnd
+
+\resumeItem{\href{https://github.com/udsy19/CloudBucket_Pentest.git}{\textbf{Advanced Cloud Security Reconnaissance Platform}} $|$ \textit{Agentic AI–Powered Accelerated Pentesting}}
+  \resumeItemListStart
+    \resumeItem{Architected enterprise-grade security framework with \textbf{11} discovery methods including Certificate Transparency and AI analysis, processing \textbf{4+} million subdomains while designing comprehensive Azure Storage assessment system.}
+    \resumeItem{Built scalable architecture executing \textbf{52+} attack scenarios covering authentication bypass and configuration vulnerabilities, integrating local Foundation-Sec-8B model with intelligent failover systems ensuring data privacy.}
+  \resumeItemListEnd
+
+
+
+% \resumeItem{\href{https://github.com/udsy19/iex-power-optimization}{\textbf{IEX Power Sourcing Optimization App}} $|$ \textit{Intelligent Energy Procurement Decision Support}}
+%   \resumeItemListStart
+%     \resumeItem{Built power procurement optimization application scraping Indian Energy Exchange data and analyzing seasonal demand trends using ARIMA regression ensembles for manufacturing load profile modeling and sourcing strategy recommendations.}
+%     \resumeItem{Developed predictive models balancing self-generation, long-term contracts, and spot markets with confidence-weighted recommendations, targeting ₹20-30 lakhs annual savings through dynamic sourcing strategies and market trend analysis.}
+%   \resumeItemListEnd
+
+% \resumeItem{\href{https://github.com/udsy19/crypto-intelligence}{\textbf{Crypto Intelligence Dashboard}} $|$ \textit{Real-Time Blockchain Anomaly Detection Platform}}
+%   \resumeItemListStart
+%     \resumeItem{Developed real-time blockchain intelligence dashboard analyzing DEX trades, whale wallet movements, and smart contract deployments using Web3.py event listeners processing thousands of blockchain events per second.}
+  %   \resumeItem{Built comprehensive anomaly detection pipelines identifying pump-and-dump schemes, rug pulls, and wash trading patterns with actionable alerting system providing trading intelligence through dashboard and SMS integrations.}
+  % \resumeItemListEnd
+
+% \resumeItem{\href{https://github.com/udsy19/cyber-homelab}{\textbf{Cybersecurity Home Lab Environment}} $|$ \textit{Enterprise-Grade Red/Blue Team Simulation Infrastructure}}
+%   \resumeItemListStart
+%     \resumeItem{Architected enterprise-grade cybersecurity lab with VLAN-segmented networking, Synology DS220+ NAS, and multi-VM corporate infrastructure simulating red team attacks using Metasploit, Cobalt Strike, and ransomware scenarios.}
+%     \resumeItem{Implemented comprehensive blue team monitoring stack with Security Onion, ELK Stack, and Wazuh SIEM while integrating Ollama LLM server for AI-assisted threat intelligence and incident response mapped to MITRE ATT&CK framework.}
+%   \resumeItemListEnd
+
+
+ \resumeSubHeadingListEnd
+
+
+  %-----------SKILLS-----------
+% \section{Skills}
+% \resumeSubHeadingListStart
+%   \resumeSubItem{
+%     \textbf{Cybersecurity:} SIEM, Digital Forensics (DFIR), Endpoint Security, Firewall Configuration, Secure Coding, Bash Scripting
+%   }
+%   \resumeSubItem{
+%     \textbf{Networking:} TCP/IP, IPv4/IPv6, DNS, DHCP, VLANs, VPN, Virtualization (VMware, Docker)
+%   }
+%   \resumeSubItem{
+%     \textbf{Programming:} Python, C++, Java, JavaScript, PHP, SQL
+%   }
+%   \resumeSubItem{
+%     \textbf{Tools \& Platforms:} Nmap, Burp Suite, Rapid7, Wireshark, Jupyter, PyCharm, AWS, Azure, VMware vSphere, Linux, Windows
+%   }
+% \resumeSubHeadingListEnd
+
+\section{Skills}
+\resumeSubHeadingListStart
+  \resumeSubItem{
+    \textbf{Security:} Incident Response (DFIR), Threat Hunting, SIEM (Elastic, Wazuh, Security Onion), EDR, SOC Analysis, Malware Analysis, MITRE ATT\&CK, OWASP Top 10, Secure SDLC, AppSec
+  }
+  \resumeSubItem{
+    \textbf{Cloud \& Infrastructure:} AWS, Azure, IAM/RBAC, VPC, S3/Blob Security, Kubernetes, Virtualization (VMware, Proxmox)
+  }
+  \resumeSubItem{
+    \textbf{Networking:} TCP/IP, OSPF, VLANs, VPN \& IPSec, DNS, DHCP, Load Balancing, Firewalls (pfSense, Juniper, Cisco ASA)
+  }
+  \resumeSubItem{
+    \textbf{Programming:} Python, C++, Java, SQL, FastAPI, REST APIs, Web Automation, Data Processing (Pandas, NumPy)
+  }
+  \resumeSubItem{
+    \textbf{Tools:} Rapid7, Burp Suite, Nmap, Sysmon, Suricata, Wazuh, ELK Stack, Jupyter, GitHub Actions, Prometheus, Grafana
+  }
+\resumeSubHeadingListEnd
+
+
+\end{document}
