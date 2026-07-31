@@ -235,6 +235,7 @@ class ResumeAgent:
         self._clock = _Clock(float("inf"))
         self._last_craft_obs: Dict = {}
         self._wrepaired, self._wrepaired_latex = 0, ""
+        self._wrepair_done = False
         # Token usage accumulates across every call in a run so the cost of a
         # run is reportable instead of invisible.
         self.usage = {"input": 0, "output": 0, "cached": 0, "calls": 0}
@@ -665,6 +666,7 @@ class ResumeAgent:
         aggressiveness = max(1, min(3, int(aggressiveness)))
         self._clock = _Clock(RUN_BUDGET_SECONDS)
         clock = self._clock
+        self._wrepair_done = False
         if RUN_BUDGET_SECONDS < FULL_LOOP_SECONDS:
             # Silent truncation would read as a complete run that simply scored lower.
             yield {"step": "reduced_loop", "phase": "analyze",
@@ -959,7 +961,12 @@ class ResumeAgent:
             # Writing defects are repaired directly from their verified quotes rather
             # than competing for the six worklist slots, so the worklist can spend all
             # six on things only a rewrite can address.
-            if self._last_craft_obs:
+            # Once per run, not once per cycle. Running it every cycle meant up to
+            # thirty bullet rewrites, which cost truthfulness five points on a measured
+            # run and burned enough time to lose a refine cycle. The first pass fixes
+            # the bulk; the judges still catch what is left through the worklist.
+            if self._last_craft_obs and not self._wrepair_done:
+                self._wrepair_done = True
                 async for ev in self._repair_writing(latex, dump, self._last_craft_obs):
                     yield ev
                 if self._wrepaired:

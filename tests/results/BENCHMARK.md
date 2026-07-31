@@ -384,3 +384,37 @@ PASSES  [72, 67, 80, 77]
 
 The deployment also survived what the run did to it: the service stayed active throughout,
 and the two unrelated applications sharing the host were unaffected.
+
+## v8 — the five improvements, measured
+
+Same fixture, provider, aggressiveness and budget as the previous VPS run.
+
+| | before | v8 | |
+|---|---|---|---|
+| writing_quality | 10 | **13** | targeted, improved |
+| page_fit | 7 | **8** | targeted, improved |
+| truthfulness | 18 | **13** | **regression** |
+| keyword_match | 28 | 26 | knock-on |
+| must-have coverage | 100% | 93.8% | knock-on |
+| total | 80 | 77 | |
+| time | 681 s | 902 s | |
+
+Both targeted categories moved the right way. But deterministic writing repair ran
+**once per refine cycle — three times, up to ten bullets each**, and roughly thirty
+rewrites did two kinds of damage:
+
+1. **Truthfulness fell five points**, outside the ±3 noise band. Repairing a "dead tail"
+   asks for an outcome the bullet lacks; across that many rewrites the model supplied
+   outcomes the dossier does not support. The instruction said not to invent, but it
+   offered "close on the hardest technical fact" as the fallback rather than *cut*, which
+   is a weaker escape hatch than it needed.
+2. **The extra time cost a refine cycle**, and refine cycles are what land the last
+   keywords — hence coverage 100% → 93.8%.
+
+**Fix applied:** the repair runs once per run rather than once per cycle, and the
+dead-tail instruction now requires locating the outcome in the dump first and *cutting*
+the dead tail when there isn't one, on the stated grounds that a bullet which stops early
+is a small loss while an invented result is a lie on someone's resume.
+
+The lesson generalises: a repair pass that adds content is not safe to run repeatedly just
+because each individual repair looked correct.

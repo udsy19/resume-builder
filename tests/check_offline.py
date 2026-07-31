@@ -316,6 +316,27 @@ def main():
         assert not bad, f"machine-specific absolute path(s): {bad[:4]}"
     check("no machine-specific absolute paths", no_machine_specific_paths)
 
+    def writing_repair_is_bounded_and_truthful():
+        """Repairing writing must not become a licence to invent outcomes.
+
+        Running the repair every refine cycle meant up to thirty bullet rewrites, and a
+        measured run lost five points of truthfulness — the one category where a loss
+        makes the resume actively harmful to send.
+        """
+        from src import repair
+        src = (ROOT / "src" / "agent.py").read_text()
+
+        # Bounded to one pass per run.
+        assert "_wrepair_done" in src, "writing repair has no once-per-run guard"
+        loop = src.split("Once per run, not once per cycle")[1][:400]
+        assert "not self._wrepair_done" in loop, "the guard is not applied at the call site"
+
+        # And the dead-tail instruction must forbid supplying an outcome the dump lacks.
+        dt = repair.WRITING_SYSTEM.split("dead tail")[1].split("- **")[0]
+        assert "MUST ALREADY BE IN THE DUMP" in dt, "dead-tail repair may invent outcomes"
+        assert "do NOT supply one" in dt, "no instruction to cut rather than invent"
+    check("writing repair is bounded and cannot invent outcomes", writing_repair_is_bounded_and_truthful)
+
     print()
     if failures:
         print(f"{len(failures)} FAILURE(S): {', '.join(failures)}")

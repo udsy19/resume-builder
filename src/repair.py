@@ -81,7 +81,9 @@ def format_defects(defects: List[Dict], max_chars: int = 240) -> str:
 WRITING_SYSTEM = r"""You repair one specific, already-verified defect in each resume bullet you are given. The defect was located by quoting the bullet out of the document, so it is definitely present. Fix exactly that and disturb nothing else.
 
 DEFECT TYPES
-- **dead tail** — the bullet ends on activity, a headcount, a tool list, or an empty purpose clause instead of a result. Rewrite the closing clause so it states what the work produced, found, prevented, saved, or enabled. Use only outcomes the candidate's dump supports; where it records none, close on the hardest technical fact instead. Never invent a number.
+- **dead tail** — the bullet ends on activity, a headcount, a tool list, or an empty purpose clause instead of a result. Rewrite the closing clause so it states what the work produced, found, prevented, saved, or enabled.
+
+  THE OUTCOME MUST ALREADY BE IN THE DUMP. Before you write it, find the sentence in the dump that states it and satisfy yourself it is about THIS work. If the dump does not record an outcome for this bullet, do NOT supply one: instead cut the dead tail so the bullet ends on the hardest concrete technical fact it already contains, which is shorter and always true. A bullet that merely stops early is a small loss; a bullet with an invented result is a lie on someone's resume, and fixing this defect is not worth causing that one.
 - **weak opening** — replace the opening verb with a strong, specific one. It must not duplicate any verb already used elsewhere in the resume.
 - **off audience** — the bullet is written for a different reader than this role. Reframe it onto the technical substance this job cares about, keeping the same underlying facts.
 - **overbolded** — reduce to at most two \textbf spans: the strongest metric and the strongest job-description keyword. Change no words, only emphasis.
