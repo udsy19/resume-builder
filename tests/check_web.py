@@ -217,6 +217,55 @@ def main():
             importlib.reload(webapp)
     check("PIN-unlocked runs default to the configured provider", pin_selects_provider)
 
+    def provider_choice():
+        """A caller may only pick a provider whoever is paying actually has."""
+        import importlib
+        os.environ["ACCESS_PIN"] = "918273"
+        os.environ["ANTHROPIC_API_KEY"] = "sk-ant-test"
+        os.environ.pop("OPENAI_API_KEY", None)
+        try:
+            g = importlib.reload(webapp)
+            gc = TestClient(g.app)
+
+            # Locked: no choice is offered at all.
+            assert gc.get("/api/providers").json() == {"server": [], "default": None, "unlocked": False}
+
+            token = gc.post("/api/auth", json={"pin": "918273"}).json()["token"]
+            hdr = {"X-Access-Token": token}
+            body = gc.get("/api/providers", headers=hdr).json()
+            assert body["server"] == ["anthropic"], body
+            assert body["unlocked"] is True
+
+            class Req:
+                def __init__(self, tok): self.headers = {"x-access-token": tok}
+
+            # Only one provider configured: the default resolves to it even though
+            # PIN_PROVIDER asks for openai, rather than billing a key that isn't there.
+            key, prov = g._resolve_credentials(Req(token), "")
+            assert (key, prov) == ("", "anthropic"), (key, prov)
+
+            # Asking for one the server cannot pay for is refused, not silently swapped.
+            try:
+                g._resolve_credentials(Req(token), "", "openai")
+                raise AssertionError("unconfigured provider was accepted")
+            except Exception as e:
+                assert getattr(e, "status_code", None) == 400, e
+
+            # With both configured, an explicit choice is honoured.
+            os.environ["OPENAI_API_KEY"] = "sk-proj-test"
+            g2 = importlib.reload(webapp)
+            tok2 = TestClient(g2.app).post("/api/auth", json={"pin": "918273"}).json()["token"]
+            assert g2._resolve_credentials(Req(tok2), "", "openai") == ("", "openai")
+            assert g2._resolve_credentials(Req(tok2), "", "anthropic") == ("", "anthropic")
+
+            # A user's own key always wins and routes by its own prefix.
+            assert g2._resolve_credentials(Req(tok2), "sk-ant-mine", "openai") == ("sk-ant-mine", None)
+        finally:
+            for k in ("ACCESS_PIN", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"):
+                os.environ.pop(k, None)
+            importlib.reload(webapp)
+    check("provider choice is validated against who is paying", provider_choice)
+
     print()
     if failures:
         print(f"{len(failures)} FAILURE(S): {', '.join(failures)}")

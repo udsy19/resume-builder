@@ -103,9 +103,15 @@
       <span class="card-title">Settings</span>
       <span class="meta">STORED IN THIS BROWSER ONLY</span>
     </div>
-    <label class="field-label">Your Anthropic API key <span class="opt">(optional)</span></label>
-    <p class="hint">If set, your key is used and usage bills to your account. Kept in this browser's local storage — never sent anywhere except the Anthropic API via this app's backend.</p>
-    <input type="password" id="api-key-input" placeholder="sk-ant-api03-..." autocomplete="off">
+    <p class="hint">Add either or both. Your key is used instead of the server's and bills to your
+      account. Kept in this browser's local storage and sent only to this app's backend, which
+      forwards it to that provider. <strong>Add both and you can switch between them per run.</strong></p>
+
+    <label class="field-label" for="api-key-anthropic">Anthropic API key <span class="opt">(optional)</span></label>
+    <input type="password" id="api-key-anthropic" placeholder="sk-ant-api03-..." autocomplete="off">
+
+    <label class="field-label" for="api-key-openai">OpenAI API key <span class="opt">(optional)</span></label>
+    <input type="password" id="api-key-openai" placeholder="sk-proj-..." autocomplete="off">
     <div class="modal-actions">
       <button class="btn primary" id="settings-save">Save</button>
       <button class="btn ghost" id="settings-close">Close</button>

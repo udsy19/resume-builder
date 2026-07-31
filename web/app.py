@@ -219,23 +219,64 @@ async def validation_handler(request: Request, exc: RequestValidationError):
 PIN_PROVIDER = os.environ.get("PIN_PROVIDER", "openai").strip().lower() or None
 
 
-def _resolve_credentials(request: Request, supplied: str):
+def _server_providers() -> List[str]:
+    """Providers the server itself holds a key for."""
+    out = []
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        out.append("anthropic")
+    if os.environ.get("OPENAI_API_KEY"):
+        out.append("openai")
+    return out
+
+
+def _resolve_credentials(request: Request, supplied: str, requested: str = ""):
     """Return (api_key, provider) for this request, or refuse.
 
     A key the user supplied always wins — it is theirs to spend, and the provider is
-    inferred from the key itself. Otherwise the server's own key is used, and only when
-    the caller has unlocked the gate: falling back to the environment unconditionally
-    would let any visitor spend the owner's credits, which is what the gate prevents.
+    inferred from the key itself, so the client simply sends the key for whichever
+    provider it picked. Otherwise the server's own key is used, and only when the caller
+    has unlocked the gate: falling back to the environment unconditionally would let any
+    visitor spend the owner's credits, which is what the gate prevents.
     """
     supplied = (supplied or "").strip()
     if supplied:
         return supplied, None                       # None: auto-detect from the key prefix
-    if _server_key_allowed(request):
-        return "", PIN_PROVIDER                     # provider falls back to the env key
-    raise HTTPException(
-        status_code=401,
-        detail="Enter the access PIN at the bottom of the sidebar, or add your own API key in Settings.",
-    )
+
+    if not _server_key_allowed(request):
+        raise HTTPException(
+            status_code=401,
+            detail="Enter the access PIN at the bottom of the sidebar, or add your own API key in Settings.",
+        )
+
+    available = _server_providers()
+    if not available:
+        raise HTTPException(status_code=503, detail="No model provider is configured on the server.")
+
+    requested = (requested or "").strip().lower()
+    if requested:
+        # A caller may only pick a provider the server can actually pay for; silently
+        # falling back to a different one would bill a model they did not choose.
+        if requested not in available:
+            raise HTTPException(
+                status_code=400,
+                detail=f"This server has no key for {requested}. Available: {', '.join(available)}.",
+            )
+        return "", requested
+    default = PIN_PROVIDER if PIN_PROVIDER in available else available[0]
+    return "", default
+
+
+@app.get("/api/providers")
+async def providers(request: Request):
+    """What this caller may choose between.
+
+    The client shows a toggle only when there is a real choice — with one provider
+    configured there is nothing to decide, so it shows none.
+    """
+    unlocked = _server_key_allowed(request)
+    available = _server_providers() if unlocked else []
+    default = PIN_PROVIDER if PIN_PROVIDER in available else (available[0] if available else None)
+    return {"server": available, "default": default, "unlocked": unlocked}
 
 
 def _friendly_error(e: Exception) -> str:
@@ -264,6 +305,7 @@ class EditRequest(BaseModel):
     history: List[ChatTurn] = Field(default_factory=list, max_length=24)
     job_description: str = Field(default="", max_length=MAX_JD_CHARS)
     api_key: str = Field(default="", max_length=300)
+    provider: str = Field(default="", max_length=20)
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -377,6 +419,7 @@ async def tailor_stream(
     custom_template: Optional[UploadFile] = File(None),
     api_key: str = Form(""),
     cover_letter: bool = Form(False),
+    provider: str = Form(""),
 ):
     """Run the agentic tailoring loop, streaming progress as SSE."""
     # Rate limiting happens in middleware, before routing — see rate_limit_middleware.
@@ -421,7 +464,7 @@ async def tailor_stream(
 
     # Resolved before the stream opens: an HTTPException raised inside the generator
     # cannot set a status code, because the headers are already on the wire.
-    resolved_key, resolved_provider = _resolve_credentials(request, api_key)
+    resolved_key, resolved_provider = _resolve_credentials(request, api_key, provider)
 
     async def events():
         try:
@@ -477,7 +520,7 @@ async def edit_stream(request: Request, edit: EditRequest):
     if not edit.instruction.strip():
         raise HTTPException(status_code=400, detail="Tell me what to change.")
 
-    resolved_key, resolved_provider = _resolve_credentials(request, edit.api_key)
+    resolved_key, resolved_provider = _resolve_credentials(request, edit.api_key, edit.provider)
 
     async def events():
         try:

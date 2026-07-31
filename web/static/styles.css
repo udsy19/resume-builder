@@ -870,3 +870,65 @@ details.advanced[open] summary { margin-bottom: 14px; }
 }
 .doc-tab:hover { opacity: 0.85; }
 .doc-tab.on { opacity: 1; border-bottom-color: var(--accent); }
+
+/* Reasoning stream: markdown from the model, rendered rather than shown raw. */
+.think-stream b { font-weight: 600; }
+.think-stream .th-head {
+  display: block;
+  margin: 0.85em 0 0.2em;
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.75;
+}
+.think-stream .th-head:first-child { margin-top: 0; }
+.think-stream code {
+  font-family: var(--mono);
+  font-size: 0.85em;
+  padding: 0 3px;
+  background: color-mix(in srgb, var(--figure) 10%, transparent);
+}
+.think-stream i { font-style: italic; opacity: 0.9; }
+
+/* ── Provider picker ──
+   Only rendered when more than one provider is available, so it never asks the
+   reader to make a choice that does not exist. */
+.prov { border: 1px solid color-mix(in srgb, var(--figure) 22%, transparent); }
+.prov-row { display: flex; align-items: center; gap: 12px; padding: 0.7rem 1rem; }
+.prov-label { opacity: 0.55; flex-shrink: 0; }
+.prov-toggle { display: flex; border: 1px solid color-mix(in srgb, var(--figure) 30%, transparent); }
+.prov-opt {
+  background: none;
+  border: none;
+  border-right: 1px solid color-mix(in srgb, var(--figure) 22%, transparent);
+  color: inherit;
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 6px 14px;
+  cursor: pointer;
+  opacity: 0.55;
+}
+.prov-opt:last-child { border-right: none; }
+.prov-opt:hover { opacity: 0.9; }
+.prov-opt.on { background: var(--cobalt); color: var(--paper); opacity: 1; }
+.prov-more { margin-left: auto; font-size: 0.8rem; }
+
+.prov-info {
+  border-top: 1px solid color-mix(in srgb, var(--figure) 22%, transparent);
+  padding: 0.9rem 1rem 1rem;
+  display: grid;
+  gap: 0.9rem;
+}
+.prov-card-head { display: flex; align-items: baseline; gap: 9px; margin-bottom: 3px; }
+.prov-card-head .mono { opacity: 0.5; }
+.prov-good { font-size: 0.85rem; font-weight: 600; }
+.prov-detail { font-size: 0.8125rem; line-height: 1.5; opacity: 0.8; margin-top: 3px; max-width: 68ch; }
+.prov-foot { opacity: 0.4; padding-top: 0.2rem; }
+
+@media (max-width: 640px) {
+  .prov-row { flex-wrap: wrap; }
+  .prov-more { margin-left: 0; }
+}

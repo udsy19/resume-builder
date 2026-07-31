@@ -246,6 +246,51 @@ def main():
             "the failure logger references the PIN — it must never be logged"
     check("failed-attempt logging never includes the PIN", lockout_never_logs_the_pin)
 
+    def thinking_renderer_is_safe():
+        """The reasoning stream renders model markdown, so it must not render model HTML.
+
+        Reasoning summaries are markdown — OpenAI's lead with bold section headers, which
+        is why the panel was showing literal "**Assessing security measures**". Rendering
+        them means model output reaches innerHTML, so escaping must come first.
+        """
+        import json, shutil, subprocess
+
+        src = (ROOT / "web" / "static" / "app.js").read_text()
+        assert "function renderThinking" in src, "renderThinking is missing"
+        fn = src[src.index("function renderThinking"):]
+        fn = fn[:fn.index("\n}\n") + 3]
+
+        # Escaping must be the first thing that touches the input.
+        body = fn[fn.index("{"):]
+        assert body.index("esc(md)") < body.index(".replace("), \
+            "renderThinking transforms before escaping — model output could inject markup"
+
+        if not shutil.which("node"):
+            return                                   # source check above still applied
+
+        harness = (
+            'function esc(s){return String(s).replace(/[&<>"]/g,'
+            'c=>({"&":"&amp;","<":"&lt;",">":"&gt;",\'"\':"&quot;"}[c]));}\n'
+            + fn +
+            '\nconst out = ['
+            '  renderThinking("<img src=x onerror=alert(1)>"),'
+            '  renderThinking("**bold <script>alert(1)</script>**"),'
+            '  renderThinking("**Assessing security measures**"),'
+            '  renderThinking("Use **SIEM** and `grep`")'
+            '];\nconsole.log(JSON.stringify(out));'
+        )
+        res = subprocess.run(["node", "-e", harness], capture_output=True, text=True, timeout=30)
+        assert res.returncode == 0, f"renderer threw: {res.stderr[:200]}"
+        xss1, xss2, header, inline = json.loads(res.stdout)
+
+        for out in (xss1, xss2):
+            assert "<img" not in out and "<script" not in out, f"markup survived: {out}"
+            assert "&lt;" in out, f"input was not escaped: {out}"
+        assert "**" not in header, f"markdown left raw: {header}"
+        assert "<b" in header, f"header not rendered: {header}"
+        assert "<b>SIEM</b>" in inline and "<code>grep</code>" in inline, inline
+    check("reasoning stream renders markdown without rendering HTML", thinking_renderer_is_safe)
+
     print()
     if failures:
         print(f"{len(failures)} FAILURE(S): {', '.join(failures)}")

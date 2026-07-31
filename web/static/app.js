@@ -208,6 +208,8 @@ function renderDraft(desk, s) {
       </div>
     </details>
 
+    ${providerPicker(s)}
+
     <label class="opt-row" for="f-cover">
       <input type="checkbox" id="f-cover" ${s.coverLetter ? "checked" : ""}>
       <span class="opt-copy">
@@ -228,6 +230,8 @@ function renderDraft(desk, s) {
   </div>`;
 
   // wire
+  wireProviderPicker(s);
+
   $("f-cover").addEventListener("change", (e) => {
     s.coverLetter = e.target.checked;
     save();
@@ -365,7 +369,7 @@ function renderRunning(desk, s) {
     <div class="dash-grid">
       <section class="dash-panel span2">
         <div class="panel-head"><span class="meta">MODEL REASONING · LIVE</span></div>
-        <pre id="r-think" class="think-stream">${s.thinking ? esc(s.thinking)
+        <pre id="r-think" class="think-stream">${s.thinking ? renderThinking(s.thinking)
           : "Waiting for the model's reasoning…\n\nThe model only narrates when it actually deliberates, so this stays empty on\nstraightforward steps. Progress is still visible in the bar and the activity log."}</pre>
       </section>
 
@@ -706,6 +710,122 @@ function renderStopped(desk, s) {
 
 /* ══ Run engine ════════════════════════════════════════════════════ */
 
+/* ── Reasoning stream rendering ──
+   Reasoning summaries arrive as markdown — OpenAI's in particular lead with bold
+   section headers — and dumping them into a <pre> showed the reader literal
+   "**Assessing security measures**". This renders the small subset that actually
+   appears, and nothing else.
+
+   Escaping happens FIRST and the transforms only ever introduce tags of our own, so
+   model output can never inject markup. */
+function renderThinking(md) {
+  return esc(md)
+    // ### Heading  /  **Heading** alone on a line -> a real heading
+    .replace(/^#{1,6}\s+(.+)$/gm, '<b class="th-head">$1</b>')
+    .replace(/^\*\*(.+?)\*\*:?\s*$/gm, '<b class="th-head">$1</b>')
+    // inline emphasis and code
+    .replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
+    .replace(/(^|[\s(])\*(?!\s)([^*\n]+?)\*(?=[\s.,;:)]|$)/g, "$1<i>$2</i>")
+    .replace(/`([^`\n]+?)`/g, "<code>$1</code>")
+    // list markers -> a real bullet, so the indent reads as structure
+    .replace(/^\s*[-*+]\s+/gm, "  • ")
+    .replace(/^\s*(\d+)\.\s+/gm, "  $1. ");
+}
+
+/* ── Providers ──
+   A toggle is only worth showing when there is a real choice. With one provider
+   available there is nothing to decide, so none appears. */
+const PROVIDER_INFO = {
+  anthropic: {
+    label: "Claude",
+    model: "claude-opus-5",
+    good: "Truthfulness and speed.",
+    detail: "On the same job description it scored 18/20 on the fact-check against your " +
+            "dossier, and finished four refine passes where OpenAI managed two. More passes " +
+            "is what lands the last keywords, so it usually scores higher too.",
+  },
+  openai: {
+    label: "OpenAI",
+    model: "gpt-5.6",
+    good: "A different voice, and a fallback.",
+    detail: "Writes noticeably differently, which is useful if Claude's phrasing isn't " +
+            "landing. It is about twice as slow per unit of work here, and scored 4/20 on " +
+            "the fact-check — it is far more willing to state things your dossier does not " +
+            "support, so read the result closely before sending it.",
+  },
+};
+
+// Migrate the old single-key setting into whichever provider it belongs to.
+function migrateKeys() {
+  const legacy = (state.settings.apiKey || "").trim();
+  if (!legacy) return;
+  if (legacy.startsWith("sk-ant") && !state.settings.anthropicKey) state.settings.anthropicKey = legacy;
+  else if (legacy.startsWith("sk-proj") && !state.settings.openaiKey) state.settings.openaiKey = legacy;
+  delete state.settings.apiKey;
+  save();
+}
+
+function userKeyFor(p) {
+  return p === "openai" ? (state.settings.openaiKey || "") : (state.settings.anthropicKey || "");
+}
+
+/* Which providers this visitor can actually run with: their own keys first, since those
+   are theirs to spend, plus whatever the server offers once the gate is unlocked. */
+function availableProviders() {
+  const mine = ["anthropic", "openai"].filter(userKeyFor);
+  if (mine.length) return mine;
+  return state.serverProviders || [];
+}
+
+function chosenProvider(s) {
+  const avail = availableProviders();
+  if (!avail.length) return null;
+  return avail.includes(s.provider) ? s.provider : (state.serverDefault && avail.includes(state.serverDefault)
+    ? state.serverDefault : avail[0]);
+}
+
+function providerPicker(s) {
+  const avail = availableProviders();
+  if (avail.length < 2) return "";              // nothing to choose between
+  const active = chosenProvider(s);
+  return `
+    <div class="prov">
+      <div class="prov-row">
+        <span class="meta prov-label">MODEL</span>
+        <div class="prov-toggle" id="prov-toggle">
+          ${avail.map((p) => `
+            <button type="button" class="prov-opt ${p === active ? "on" : ""}" data-prov="${p}">
+              ${PROVIDER_INFO[p].label}
+            </button>`).join("")}
+        </div>
+        <button type="button" class="linklike prov-more" id="prov-more">Which should I pick?</button>
+      </div>
+      <div class="prov-info" id="prov-info" hidden>
+        ${avail.map((p) => `
+          <div class="prov-card">
+            <div class="prov-card-head"><strong>${PROVIDER_INFO[p].label}</strong>
+              <span class="mono small">${PROVIDER_INFO[p].model}</span></div>
+            <div class="prov-good">${PROVIDER_INFO[p].good}</div>
+            <p class="prov-detail">${PROVIDER_INFO[p].detail}</p>
+          </div>`).join("")}
+        <p class="prov-foot meta">MEASURED ON THE SAME JOB DESCRIPTION AND DOSSIER · SEE BENCHMARK.MD</p>
+      </div>
+    </div>`;
+}
+
+function wireProviderPicker(s) {
+  const wrap = $("prov-toggle");
+  if (!wrap) return;
+  wrap.querySelectorAll(".prov-opt").forEach((b) => {
+    b.addEventListener("click", () => { s.provider = b.dataset.prov; save(); renderAll(); });
+  });
+  $("prov-more").addEventListener("click", () => {
+    const box = $("prov-info");
+    box.hidden = !box.hidden;
+    $("prov-more").textContent = box.hidden ? "Which should I pick?" : "Hide";
+  });
+}
+
 function pushLog(s, text, kind = "") {
   s.log.push({ text, kind });
 
@@ -722,7 +842,12 @@ async function startRun(s) {
   form.append("aggressiveness", String(s.aggressiveness));
   form.append("template_id", s.templateId);
   form.append("cover_letter", s.coverLetter ? "true" : "false");
-  if (state.settings.apiKey) form.append("api_key", state.settings.apiKey);
+  const prov = chosenProvider(s);
+  if (prov) form.append("provider", prov);
+  // Send the key for the chosen provider only. The server infers the provider from the
+  // key when one is supplied, so these can never disagree.
+  const myKey = prov ? userKeyFor(prov) : "";
+  if (myKey) form.append("api_key", myKey);
   if (state.profile.kind === "file") {
     form.append("dump", b64ToFile(state.profile.fileB64, state.profile.filename, state.profile.fileType));
   } else {
@@ -779,7 +904,7 @@ function handleRunUpdate(s, u) {
         const el = $("r-think");
         if (el) {
           const stick = atBottom(el);
-          el.textContent = s.thinking;
+          el.innerHTML = renderThinking(s.thinking);
           el.classList.remove("placeholder");
           if (stick) el.scrollTop = el.scrollHeight;
         }
@@ -964,7 +1089,8 @@ async function sendEdit(s) {
         instruction,
         history: s.chat.slice(0, -1).slice(-10),
         job_description: (s.jd || "").slice(0, 6000),
-        api_key: state.settings.apiKey || "",
+        api_key: userKeyFor(chosenProvider(s) || "anthropic") || "",
+        provider: chosenProvider(s) || "",
       }),
     });
     if (!res.ok) {
@@ -1185,12 +1311,15 @@ function b64ToFile(b64, filename, type) {
 /* ══ Settings modal ════════════════════════════════════════════════ */
 
 $("settings-btn").addEventListener("click", () => {
-  $("api-key-input").value = state.settings.apiKey || "";
+  $("api-key-anthropic").value = state.settings.anthropicKey || "";
+  $("api-key-openai").value = state.settings.openaiKey || "";
   $("settings-modal").showModal();
 });
 $("settings-close").addEventListener("click", () => $("settings-modal").close());
 $("settings-save").addEventListener("click", () => {
-  state.settings.apiKey = $("api-key-input").value.trim();
+  state.settings.anthropicKey = $("api-key-anthropic").value.trim();
+  state.settings.openaiKey = $("api-key-openai").value.trim();
+  delete state.settings.apiKey;                 // superseded by the per-provider fields
   saveSettings();
   $("settings-modal").close();
 });
@@ -1210,6 +1339,17 @@ function showGate(unlocked) {
   $("gate").hidden = false;
   $("gate-form").hidden = unlocked;
   $("gate-ok").hidden = !unlocked;
+}
+
+async function loadProviders() {
+  try {
+    const r = await fetch("/api/providers", { headers: accessHeaders() });
+    if (!r.ok) return;
+    const d = await r.json();
+    state.serverProviders = d.server || [];
+    state.serverDefault = d.default || null;
+    renderDesk();
+  } catch { /* leave the toggle hidden */ }
 }
 
 async function initGate() {
@@ -1238,6 +1378,7 @@ async function initGate() {
       localStorage.setItem(LS_TOKEN, body.token || "");
       $("pin-input").value = "";
       showGate(true);
+      loadProviders();
     } catch (err) {
       msg.textContent = String(err.message || err);
       msg.hidden = false;
@@ -1249,6 +1390,7 @@ async function initGate() {
   $("gate-lock").addEventListener("click", () => {
     localStorage.removeItem(LS_TOKEN);
     showGate(false);
+    loadProviders();
   });
 }
 
@@ -1260,9 +1402,11 @@ async function boot() {
     const res = await fetch("/api/templates");
     state.templates = (await res.json()).templates;
   } catch { state.templates = [{ id: "udaya", name: "Udaya's Template", description: "Default", default: true }]; }
+  migrateKeys();
   renderAll();
   loadStars();
   initGate();
+  loadProviders();
   if (!state.profile) setTimeout(openProfile, 400);
 }
 
