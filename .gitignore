@@ -60,3 +60,6 @@ output/*.pdf
 tests/results/*.tex
 tests/results/*.json
 !tests/results/judge_noise.json
+.vercel
+.env*
+!.env.example
