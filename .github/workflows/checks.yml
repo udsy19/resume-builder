@@ -17,12 +17,15 @@ jobs:
           cache: pip
 
       # The offline suite compiles every template, so a real TeX toolchain is
-      # required. texlive-latex-extra carries the packages the templates use.
+      # required. texlive-fonts-extra is not optional: the templates use
+      # CormorantGaramond, FiraSans, roboto, sourcesanspro and noto-sans, none of
+      # which ship in a base install — CI caught this by failing to compile.
       - name: Install TeX
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
-            texlive-latex-base texlive-latex-extra texlive-fonts-recommended
+            texlive-latex-base texlive-latex-extra \
+            texlive-fonts-recommended texlive-fonts-extra
 
       - name: Install dependencies
         run: pip install -r requirements.txt

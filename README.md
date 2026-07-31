@@ -37,7 +37,16 @@ The 95 threshold in the code is the loop's *stopping condition*, not a claim abo
 
 ## Quickstart
 
-**Prerequisites:** Python 3.11+, a TeX distribution with `pdflatex` on your `PATH` ([MacTeX](https://tug.org/mactex/), [TeX Live](https://tug.org/texlive/), or MiKTeX), and an API key from Anthropic or OpenAI.
+**Prerequisites:** Python 3.11+, a TeX distribution with `pdflatex` on your `PATH`, and an API key from Anthropic or OpenAI.
+
+The templates use font packages that a *base* TeX install does not ship — `CormorantGaramond`, `FiraSans`, `roboto`, `sourcesanspro`, `noto-sans`. A full distribution ([MacTeX](https://tug.org/mactex/), [TeX Live](https://tug.org/texlive/), MiKTeX) has them. On a minimal Debian/Ubuntu install:
+
+```bash
+sudo apt-get install texlive-latex-base texlive-latex-extra \
+                     texlive-fonts-recommended texlive-fonts-extra
+```
+
+If a template fails to compile, this is almost always why — `tests/check_offline.py` will tell you which one.
 
 ```bash
 git clone https://github.com/udsy19/resume-builder.git
