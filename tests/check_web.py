@@ -184,6 +184,39 @@ def main():
         assert client.get("/api/auth/status").json() == {"gate": "disabled", "unlocked": True}
     check("gate is disabled when no PIN is configured", gate_off_by_default)
 
+    def pin_selects_provider():
+        """A PIN-unlocked run spends the operator's credits, so the operator picks
+        the provider. A visitor's own key still routes to that key's own provider."""
+        import importlib
+        os.environ["ACCESS_PIN"] = "918273"
+        try:
+            gated = importlib.reload(webapp)
+            gc = TestClient(gated.app)
+            assert gated.PIN_PROVIDER == "openai", f"PIN provider is {gated.PIN_PROVIDER!r}"
+
+            token = gc.post("/api/auth", json={"pin": "918273"}).json()["token"]
+
+            class Req:
+                def __init__(self, tok): self.headers = {"x-access-token": tok}
+
+            key, provider = gated._resolve_credentials(Req(token), "")
+            assert key == "" and provider == "openai", (key, provider)
+
+            # A supplied key must not be overridden — it routes by its own prefix.
+            key, provider = gated._resolve_credentials(Req(token), "sk-ant-user-key")
+            assert key == "sk-ant-user-key" and provider is None, (key, provider)
+
+            # Still refused without a token.
+            try:
+                gated._resolve_credentials(Req("bogus"), "")
+                raise AssertionError("locked request was allowed the server key")
+            except Exception as e:
+                assert getattr(e, "status_code", None) == 401, e
+        finally:
+            os.environ.pop("ACCESS_PIN", None)
+            importlib.reload(webapp)
+    check("PIN-unlocked runs default to the configured provider", pin_selects_provider)
+
     print()
     if failures:
         print(f"{len(failures)} FAILURE(S): {', '.join(failures)}")

@@ -204,6 +204,7 @@ Provider selection uses `RESUME_PROVIDER`, or is auto-detected from whichever ke
 | `PROVIDER_MAX_RETRIES` | `3` | SDK-level retries on connection failures |
 | `LENS_TIMEOUT_SECONDS` | `150` | Hard ceiling on any one judge lens |
 | `ACCESS_PIN` | *(unset)* | Gate the server's API key behind a PIN — see below |
+| `PIN_PROVIDER` | `openai` | Provider used by PIN-unlocked runs, which spend the operator's credits. A visitor's own key always routes to that key's own provider. |
 | `SESSION_SECRET` | derived | HMAC secret for session tokens; set explicitly in production |
 
 ### Time budget

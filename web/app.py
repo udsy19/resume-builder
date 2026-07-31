@@ -164,19 +164,25 @@ async def validation_handler(request: Request, exc: RequestValidationError):
     return JSONResponse(status_code=422, content={"detail": errors})
 
 
-def _resolve_key(request: Request, supplied: str) -> str:
-    """Pick the key for this request, or refuse.
+# Which provider the server's own key should use. Requests that come in on the PIN
+# spend the operator's credits, so the operator picks the provider for them; a visitor
+# bringing their own key still gets whichever provider that key belongs to.
+PIN_PROVIDER = os.environ.get("PIN_PROVIDER", "openai").strip().lower() or None
 
-    A key the user supplied always wins — it is theirs to spend. Otherwise the
-    server's own key is used only when the caller has unlocked the gate; without
-    that, falling back to the environment would let any visitor spend the owner's
-    credits, which is exactly what the gate exists to prevent.
+
+def _resolve_credentials(request: Request, supplied: str):
+    """Return (api_key, provider) for this request, or refuse.
+
+    A key the user supplied always wins — it is theirs to spend, and the provider is
+    inferred from the key itself. Otherwise the server's own key is used, and only when
+    the caller has unlocked the gate: falling back to the environment unconditionally
+    would let any visitor spend the owner's credits, which is what the gate prevents.
     """
     supplied = (supplied or "").strip()
     if supplied:
-        return supplied
+        return supplied, None                       # None: auto-detect from the key prefix
     if _server_key_allowed(request):
-        return ""                                   # provider falls back to the env key
+        return "", PIN_PROVIDER                     # provider falls back to the env key
     raise HTTPException(
         status_code=401,
         detail="Enter the access PIN at the bottom of the sidebar, or add your own API key in Settings.",
@@ -366,11 +372,11 @@ async def tailor_stream(
 
     # Resolved before the stream opens: an HTTPException raised inside the generator
     # cannot set a status code, because the headers are already on the wire.
-    resolved_key = _resolve_key(request, api_key)
+    resolved_key, resolved_provider = _resolve_credentials(request, api_key)
 
     async def events():
         try:
-            agent = ResumeAgent(user_api_key=resolved_key)
+            agent = ResumeAgent(user_api_key=resolved_key, provider=resolved_provider)
             final = None
             async for update in agent.run(
                 dump=the_dump,
@@ -422,11 +428,11 @@ async def edit_stream(request: Request, edit: EditRequest):
     if not edit.instruction.strip():
         raise HTTPException(status_code=400, detail="Tell me what to change.")
 
-    resolved_key = _resolve_key(request, edit.api_key)
+    resolved_key, resolved_provider = _resolve_credentials(request, edit.api_key)
 
     async def events():
         try:
-            agent = ResumeAgent(user_api_key=resolved_key)
+            agent = ResumeAgent(user_api_key=resolved_key, provider=resolved_provider)
             async for update in agent.edit(
                 latex=edit.latex,
                 instruction=edit.instruction,
