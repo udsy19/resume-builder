@@ -775,3 +775,41 @@ details.advanced[open] summary { margin-bottom: 14px; }
   line-height: 1.5;
   max-width: 62ch;
 }
+
+/* ── Access gate ──
+   Small by design: it is a doorway, not a feature. Hidden entirely when the
+   deployment sets no ACCESS_PIN, so a local checkout never sees it. */
+.gate {
+  margin-top: 0.9rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid rgb(239 237 234 / 0.18);
+}
+.gate-label { opacity: 0.5; display: block; margin-bottom: 6px; }
+.gate-row { display: flex; gap: 6px; }
+.gate-row input {
+  flex: 1;
+  min-width: 0;
+  background: rgb(239 237 234 / 0.06);
+  border: 1px solid rgb(239 237 234 / 0.22);
+  color: var(--paper);
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  letter-spacing: 0.25em;
+  padding: 7px 9px;
+}
+.gate-row input:focus { outline: none; border-color: var(--sky); }
+.gate-go {
+  flex-shrink: 0;
+  padding: 0 11px;
+  background: rgb(239 237 234 / 0.1);
+  border: 1px solid rgb(239 237 234 / 0.22);
+  color: var(--paper);
+  cursor: pointer;
+  font-family: var(--mono);
+}
+.gate-go:hover { background: var(--cobalt); border-color: var(--cobalt); }
+.gate-go[disabled] { opacity: 0.45; cursor: default; }
+.gate-msg { margin-top: 7px; color: var(--signal); text-transform: none; letter-spacing: 0; }
+.gate-msg.good { color: var(--sky); }
+.gate-ok { display: flex; align-items: center; gap: 8px; opacity: 0.75; }
+.gate-ok .linklike { margin-left: auto; opacity: 0.6; }

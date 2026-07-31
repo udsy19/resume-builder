@@ -51,10 +51,17 @@ TAIL_RESERVE_SECONDS = int(os.environ.get("TAIL_RESERVE_SECONDS", "80"))
 # Measured cost of one tighten / repair / expand round. These phases are polish: when
 # time is short they are skipped so the evaluation loop, which is not optional, still runs.
 POLISH_ROUND_SECONDS = 20
-# Measured cost of one refine + re-evaluate cycle (~150s refining, ~36s across the three
-# parallel judges). A cycle is only started if it can finish, because a half-finished
-# refinement is worth nothing: the loop ships the champion draft either way.
-REFINE_CYCLE_SECONDS = 190
+# Measured cost of one refine + re-evaluate cycle. Since refinement returns patches
+# instead of a re-emitted document this is ~25-45s of refining plus ~40s across the three
+# parallel judges, against ~190s before. The occasional structural rewrite still costs the
+# old amount, so the reserve keeps some headroom over the common case.
+# A cycle is only started if it can finish: a half-finished refinement is worth nothing,
+# because the loop ships the champion draft either way.
+REFINE_CYCLE_SECONDS = int(os.environ.get("REFINE_CYCLE_SECONDS", "110"))
+# Hard ceiling on any one judge lens, including its retry. A lens normally takes 25-45s.
+# This exists because the SDK's per-request timeout only catches a stalled read: a stream
+# that trickles keeps every read alive, and one run sat in the fan-out for 72 minutes.
+LENS_TIMEOUT_SECONDS = int(os.environ.get("LENS_TIMEOUT_SECONDS", "150"))
 SCORE_CAPS = {"keyword_match": 30, "ats_compliance": 20, "writing_quality": 20, "truthfulness": 20, "page_fit": 10}
 
 # Reasoning depth per phase — Opus 5 is strong at low/medium; only writing needs high.
@@ -329,8 +336,22 @@ class ResumeAgent:
             await queue.put({"__done__": name, "result": None,
                              "error": str(last_error) if last_error else "returned no result"})
 
+        async def guarded(name: str, lens: Dict, queue: asyncio.Queue):
+            """Bound each lens in wall-clock time.
+
+            The per-request SDK timeout only fires when a read stalls; a stream that
+            trickles slowly keeps every individual read alive and can run indefinitely.
+            One observed run sat in this fan-out for 72 minutes because a lens never
+            finished and never errored. The fan-out therefore enforces its own deadline.
+            """
+            try:
+                await asyncio.wait_for(one(name, lens, queue), timeout=LENS_TIMEOUT_SECONDS)
+            except asyncio.TimeoutError:
+                await queue.put({"__done__": name, "result": None,
+                                 "error": f"no verdict within {LENS_TIMEOUT_SECONDS}s"})
+
         queue: asyncio.Queue = asyncio.Queue()
-        tasks = [asyncio.create_task(one(n, l, queue)) for n, l in prompts.JUDGE_LENSES.items()]
+        tasks = [asyncio.create_task(guarded(n, l, queue)) for n, l in prompts.JUDGE_LENSES.items()]
         results: Dict[str, Dict] = {}
         errors: Dict[str, str] = {}
         try:
@@ -411,6 +432,7 @@ class ResumeAgent:
         """
         total_fixed = 0
         self._tightened, self._tightened_latex = 0, latex
+        prev_headroom = None
         for _ in range(rounds):
             if self._clock.expired(TAIL_RESERVE_SECONDS + POLISH_ROUND_SECONDS):
                 yield {"step": "skipped", "phase": "tighten",
@@ -421,6 +443,17 @@ class ResumeAgent:
                 break
             if fit.pages == 1 and fit.headroom_pt >= 0:
                 break
+            # A round that does not claw back any height is not going to succeed on the
+            # next attempt either: an observed run spent 146s tightening twice against an
+            # unchanged 186pt overflow. The deterministic fit solver handles this case
+            # properly at the end, so hand off rather than spend more rounds on it.
+            if prev_headroom is not None and fit.headroom_pt <= prev_headroom + 1.0:
+                yield {"step": "skipped", "phase": "tighten",
+                       "message": f"Tightening stopped making progress ({round(-fit.headroom_pt)}pt "
+                                  "still over) — the one-page solver will finish the job.",
+                       "data": {"headroom_pt": round(fit.headroom_pt, 1)}}
+                break
+            prev_headroom = fit.headroom_pt
             lines_over = (-fit.headroom_pt / LINE_COST_PT) + 1  # +1 line of slack
             todo = bullets_to_tighten(latex, lines_over)
             if not todo:
@@ -924,21 +957,55 @@ class ResumeAgent:
                 {"type": "text", "text": prompts.TEMPLATE_INSTRUCTION.format(template=template_latex),
                  "cache_control": {"type": "ephemeral"}},
             ] + dump.as_content_blocks(respec)
+            # Patches, not a re-emitted document. Refinement was ~58% of a full run's wall
+            # clock purely because fixing six bullets meant writing the whole resume out
+            # again — several thousand output tokens to change a few hundred. The writer
+            # can still ask for a rewrite when the change is genuinely structural.
             msg = None
             try:
                 async for ev in self._stream_call(
                     phase="refine", system=writer_system,
                     messages=[{"role": "user", "content": respec_content}],
+                    output_schema=prompts.EDIT_SCHEMA,
                 ):
                     if ev["event"] == "message":
                         msg = ev["message"]
                     else:
                         yield {"step": "live", **ev}
-                latex = _extract_latex(_text_of(msg))
+                revision = _parse_json(_text_of(msg))
             except (ProviderError, AgentError) as e:
                 yield {"step": "degraded",
                        "message": f"Refinement failed ({e}); shipping the best draft so far."}
                 break
+
+            previous = latex
+            if revision.get("mode") == "patch" and revision.get("edits"):
+                try:
+                    latex = apply_patches(latex, revision["edits"])
+                    yield {"step": "patched", "iteration": iteration,
+                           "message": f"Applied {len(revision['edits'])} targeted edit(s)"
+                                      + (f" — {revision['reply']}" if revision.get("reply") else ""),
+                           "data": {"edits": len(revision["edits"])}}
+                except AgentError as e:
+                    # An anchor that no longer matches means the patch set is unusable.
+                    # Keep the draft rather than applying it half-way.
+                    latex = previous
+                    yield {"step": "degraded",
+                           "message": f"Targeted edits did not apply ({e}); keeping the current draft."}
+            elif revision.get("latex", "").strip():
+                latex = _extract_latex(revision["latex"])
+            else:
+                yield {"step": "degraded",
+                       "message": "Refinement returned no usable change; keeping the current draft."}
+
+            # A patch set can still produce a document that will not build. Verify before
+            # the next evaluation spends three judges on it, and roll back if it broke.
+            if latex is not previous:
+                verify = await compile_pdf(latex)
+                if not verify.ok:
+                    latex = previous
+                    yield {"step": "degraded",
+                           "message": "That revision no longer compiled, so it was rolled back."}
 
         if best["evaluation"] is None:  # e.g. every pass scored 0 — still ship what we have
             best = {"latex": latex, "evaluation": evaluation, "total": evaluation["total"], "hard_ok": False}

@@ -6,6 +6,8 @@ a job description, an optional LaTeX template choice, and an aggressiveness
 level. Output: a recursively evaluated, ATS-optimized one-page LaTeX resume.
 """
 
+import hashlib
+import hmac
 import json
 import os
 import re
@@ -45,7 +47,9 @@ MAX_LATEX_CHARS = 200_000
 MAX_INSTRUCTION_CHARS = 4_000
 
 # ── Per-IP rate limiting (in-memory; per serverless instance — a floor, not a wall) ──
-RATE_LIMITS = {"tailor": (10, 3600), "edit": (60, 3600)}
+RATE_LIMITS = {"tailor": (10, 3600), "edit": (60, 3600),
+               # Six digits is a million guesses; keep attempts scarce.
+               "auth": (8, 900)}
 _hits: dict = defaultdict(deque)
 
 
@@ -61,8 +65,76 @@ def _rate_limit(bucket: str, request: Request):
     q.append(now)
 
 
+# ── PIN gate for the server's own API key ────────────────────────────
+#
+# Without this, a deployed instance hands its own API key to every visitor: the
+# provider falls back to the environment whenever the request carries no key, so
+# anyone who found the URL could spend the owner's credits.
+#
+# The PIN lives in the environment, never in this repository — the repository is
+# public. With ACCESS_PIN unset the gate is disabled and the old behaviour applies,
+# which is what you want for local development.
+#
+# The API key itself is never sent to the browser. The client proves it knows the
+# PIN, receives a short-lived signed token, and the server uses its own key on that
+# token's behalf.
+ACCESS_PIN = os.environ.get("ACCESS_PIN", "").strip()
+SESSION_HOURS = int(os.environ.get("ACCESS_SESSION_HOURS", "720"))  # 30 days
+# Deterministic across serverless instances so a token issued by one validates on
+# another. An explicit SESSION_SECRET is better; without one, derive from the PIN.
+_SESSION_SECRET = (os.environ.get("SESSION_SECRET", "").strip()
+                   or hashlib.sha256(f"resume-builder:{ACCESS_PIN}".encode()).hexdigest())
+
+
+def _issue_token() -> str:
+    expires = int(time.time()) + SESSION_HOURS * 3600
+    sig = hmac.new(_SESSION_SECRET.encode(), str(expires).encode(), hashlib.sha256).hexdigest()
+    return f"{expires}.{sig}"
+
+
+def _token_valid(token: str) -> bool:
+    if not token or "." not in token:
+        return False
+    expires, _, sig = token.partition(".")
+    if not expires.isdigit() or int(expires) < time.time():
+        return False
+    expected = hmac.new(_SESSION_SECRET.encode(), expires.encode(), hashlib.sha256).hexdigest()
+    return hmac.compare_digest(sig, expected)
+
+
+def _server_key_allowed(request: Request) -> bool:
+    """May this request fall back to the server's own API key?"""
+    if not ACCESS_PIN:
+        return True                                  # gate disabled (local dev)
+    return _token_valid(request.headers.get("x-access-token", ""))
+
+
+class PinRequest(BaseModel):
+    pin: str = Field(max_length=64)
+
+
+@app.post("/api/auth")
+async def auth(request: Request, body: PinRequest):
+    """Exchange the PIN for a signed session token. The API key never leaves the server."""
+    if not ACCESS_PIN:
+        return {"unlocked": True, "token": "", "gate": "disabled"}
+    # Constant-time compare so the response cannot be used as an oracle, and the
+    # attempt is rate limited in middleware since six digits is brute-forceable.
+    if not hmac.compare_digest(body.pin.strip(), ACCESS_PIN):
+        raise HTTPException(status_code=401, detail="That PIN is not right.")
+    return {"unlocked": True, "token": _issue_token(), "gate": "enabled"}
+
+
+@app.get("/api/auth/status")
+async def auth_status(request: Request):
+    """Whether this deployment gates its key, and whether the caller is already in."""
+    return {"gate": "enabled" if ACCESS_PIN else "disabled",
+            "unlocked": _server_key_allowed(request)}
+
+
 # Which bucket guards which path, for the middleware below.
-_RATE_LIMITED_PATHS = {"/api/tailor/stream": "tailor", "/api/edit/stream": "edit"}
+_RATE_LIMITED_PATHS = {"/api/tailor/stream": "tailor", "/api/edit/stream": "edit",
+                       "/api/auth": "auth"}
 
 
 @app.middleware("http")
@@ -88,6 +160,25 @@ async def validation_handler(request: Request, exc: RequestValidationError):
     # Strip submitted values from validation errors (they can contain API keys).
     errors = [{"loc": e.get("loc"), "msg": e.get("msg"), "type": e.get("type")} for e in exc.errors()]
     return JSONResponse(status_code=422, content={"detail": errors})
+
+
+def _resolve_key(request: Request, supplied: str) -> str:
+    """Pick the key for this request, or refuse.
+
+    A key the user supplied always wins — it is theirs to spend. Otherwise the
+    server's own key is used only when the caller has unlocked the gate; without
+    that, falling back to the environment would let any visitor spend the owner's
+    credits, which is exactly what the gate exists to prevent.
+    """
+    supplied = (supplied or "").strip()
+    if supplied:
+        return supplied
+    if _server_key_allowed(request):
+        return ""                                   # provider falls back to the env key
+    raise HTTPException(
+        status_code=401,
+        detail="Enter the access PIN at the bottom of the sidebar, or add your own API key in Settings.",
+    )
 
 
 def _friendly_error(e: Exception) -> str:
@@ -211,9 +302,13 @@ async def tailor_stream(
             raise HTTPException(status_code=400, detail=f"Unknown template '{template_id}'.")
         template_latex = template.read()
 
+    # Resolved before the stream opens: an HTTPException raised inside the generator
+    # cannot set a status code, because the headers are already on the wire.
+    resolved_key = _resolve_key(request, api_key)
+
     async def events():
         try:
-            agent = ResumeAgent(user_api_key=api_key)
+            agent = ResumeAgent(user_api_key=resolved_key)
             async for update in agent.run(
                 dump=the_dump,
                 job_description=job_description,
@@ -241,9 +336,11 @@ async def edit_stream(request: Request, edit: EditRequest):
     if not edit.instruction.strip():
         raise HTTPException(status_code=400, detail="Tell me what to change.")
 
+    resolved_key = _resolve_key(request, edit.api_key)
+
     async def events():
         try:
-            agent = ResumeAgent(user_api_key=edit.api_key)
+            agent = ResumeAgent(user_api_key=resolved_key)
             async for update in agent.edit(
                 latex=edit.latex,
                 instruction=edit.instruction,

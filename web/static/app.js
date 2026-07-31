@@ -706,7 +706,8 @@ async function startRun(s) {
   state.runs.set(s.id, { controller });
 
   try {
-    const res = await fetch("/api/tailor/stream", { method: "POST", body: form, signal: controller.signal });
+    const res = await fetch("/api/tailor/stream", {
+      method: "POST", body: form, headers: accessHeaders(), signal: controller.signal });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.detail || `Request failed (${res.status})`);
@@ -912,7 +913,7 @@ async function sendEdit(s) {
   try {
     const res = await fetch("/api/edit/stream", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...accessHeaders() },
       body: JSON.stringify({
         latex: latestLatex(s),
         instruction,
@@ -1149,6 +1150,63 @@ $("settings-save").addEventListener("click", () => {
   $("settings-modal").close();
 });
 
+
+/* ── Access gate ──
+   The server holds the API key and never sends it here. We prove we know the PIN,
+   get back a signed token, and attach it to the two endpoints that spend money. */
+const LS_TOKEN = "rb.access";
+
+function accessHeaders() {
+  const tok = localStorage.getItem(LS_TOKEN);
+  return tok ? { "X-Access-Token": tok } : {};
+}
+
+function showGate(unlocked) {
+  $("gate").hidden = false;
+  $("gate-form").hidden = unlocked;
+  $("gate-ok").hidden = !unlocked;
+}
+
+async function initGate() {
+  let status;
+  try {
+    status = await (await fetch("/api/auth/status", { headers: accessHeaders() })).json();
+  } catch { return; }                       // offline: leave the gate hidden
+  if (status.gate !== "enabled") { $("gate").hidden = true; return; }
+  showGate(!!status.unlocked);
+
+  $("gate-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const pin = $("pin-input").value.trim();
+    const msg = $("gate-msg");
+    if (!pin) return;
+    $("pin-submit").disabled = true;
+    msg.hidden = true;
+    try {
+      const res = await fetch("/api/auth", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pin }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.detail || "That PIN is not right.");
+      localStorage.setItem(LS_TOKEN, body.token || "");
+      $("pin-input").value = "";
+      showGate(true);
+    } catch (err) {
+      msg.textContent = String(err.message || err);
+      msg.hidden = false;
+    } finally {
+      $("pin-submit").disabled = false;
+    }
+  });
+
+  $("gate-lock").addEventListener("click", () => {
+    localStorage.removeItem(LS_TOKEN);
+    showGate(false);
+  });
+}
+
 /* ══ Boot ══════════════════════════════════════════════════════════ */
 
 async function boot() {
@@ -1159,6 +1217,7 @@ async function boot() {
   } catch { state.templates = [{ id: "udaya", name: "Udaya's Template", description: "Default", default: true }]; }
   renderAll();
   loadStars();
+  initGate();
   if (!state.profile) setTimeout(openProfile, 400);
 }
 

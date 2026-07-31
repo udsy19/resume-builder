@@ -367,9 +367,18 @@ RESPEC_PROMPT = """You are revising an existing resume draft to fix a specific, 
 === CURRENT DRAFT ===
 {latex}
 
-Apply exactly those changes. Reproduce every other part of the document verbatim — do not rewrite, reorder, or "improve" anything the list does not name; unrequested changes have repeatedly made previous drafts worse. Fix truthfulness and page-fit items first; if a fix would break the one-page fit, cut lower-value content elsewhere to pay for it.
+Apply exactly those changes. Do not rewrite, reorder, or "improve" anything the list does not name — unrequested changes have repeatedly made previous drafts worse. Fix truthfulness and page-fit items first; if a fix would break the one-page fit, cut lower-value content elsewhere to pay for it.
 
-Return ONLY the complete corrected LaTeX document."""
+HOW TO RETURN YOUR WORK
+
+Use `mode: "patch"` and return one find/replace edit per change. This is strongly preferred: re-emitting an unchanged document costs several thousand tokens and is the single slowest step in the run, and every re-emission is another chance to silently alter a line nobody asked you to touch.
+
+- `find` must be an EXACT substring of the current draft, copied character for character including backslashes and braces. Include enough surrounding text to be unique.
+- `replace` is what it becomes; an empty string deletes.
+- Keep each edit tight — one bullet or one line, not a whole section.
+- Leave `latex` as an empty string.
+
+Use `mode: "rewrite"` and return the complete document in `latex` ONLY when the changes are genuinely structural — reordering sections, moving a role, rebalancing which experience leads the page. If you can express it as patches, patch it."""
 
 
 REFINEMENT_PROMPT = """Your draft above was evaluated against the 95%+ ResumeWorded / 95%+ VMock bar.

@@ -334,3 +334,28 @@ Secondary: OpenAI tightening cost ~73s per round against ~14s on Claude, so poli
 consumed enough budget to leave the page constraint unmet at the deadline ("Out of time
 with the page constraint unmet — trimming to one page directly"). The deterministic fit
 solver caught it and the resume still shipped on one page.
+
+## v7 — patch-based refinement
+
+Refinement re-emitted the entire document every cycle to change a few bullets, which made
+it ~58% of a full run's wall clock. It now returns find/replace patches, with a `rewrite`
+escape hatch for genuinely structural changes, verified by compiling before the next
+evaluation and rolled back if it breaks.
+
+| | before (v6) | after (v7) |
+|---|---|---|
+| refine phase | ~131-150 s | **43 s, 23 s, then one 188 s rewrite** |
+| refine cycles inside the budget | 2 | **4** |
+| must-have coverage | 82.4% | **100%** |
+| final score | 77 | **82** |
+| total run | 476 s (2 cycles) | 851 s (4 cycles) |
+
+`PASSES [73, 75, 82, 81]` — the champion held at 82 when the fourth pass came in lower.
+
+The win is not only speed: cheaper cycles mean **more of them fit in the same budget**, and
+cycles are what land the last keywords. Coverage returned to 100% for the first time since
+budget gating landed. One cycle chose `rewrite` and cost the old amount, which is the
+escape hatch working as intended rather than a regression.
+
+`REFINE_CYCLE_SECONDS` drops 190 → 110 to match, so the loop now starts cycles it would
+previously have refused for lack of time.

@@ -178,6 +178,9 @@ Provider selection uses `RESUME_PROVIDER`, or is auto-detected from whichever ke
 | `TAIL_RESERVE_SECONDS` | `80` | Reserved for the closing phases so they are actually paid for |
 | `PROVIDER_TIMEOUT_SECONDS` | `180` | Per-request timeout for the model provider |
 | `PROVIDER_MAX_RETRIES` | `3` | SDK-level retries on connection failures |
+| `LENS_TIMEOUT_SECONDS` | `150` | Hard ceiling on any one judge lens |
+| `ACCESS_PIN` | *(unset)* | Gate the server's API key behind a PIN — see below |
+| `SESSION_SECRET` | derived | HMAC secret for session tokens; set explicitly in production |
 
 ### Time budget
 
@@ -190,6 +193,31 @@ Provider selection uses `RESUME_PROVIDER`, or is auto-detected from whichever ke
 | 250 s | 0 | one evaluation, no refinement |
 
 **Shorter does not mean faster. It means worse.** When the budget cannot fit a full loop, the run says so up front and the result page repeats it, rather than letting a truncated run read as a resume that merely scored badly.
+
+---
+
+### Protecting your API key on a public deployment
+
+By default the server falls back to its own `ANTHROPIC_API_KEY` whenever a request
+carries no key. **On a public URL that means anyone who finds it can spend your credits.**
+
+Set `ACCESS_PIN` in your hosting environment to close that. Visitors then see a small PIN
+field at the bottom of the sidebar; entering the PIN exchanges it for a signed, expiring
+session token, and only requests carrying a valid token may use the server's key.
+
+- **The API key is never sent to the browser.** The client proves it knows the PIN; the
+  server spends its own key on that token's behalf.
+- The PIN is compared in constant time, and PIN attempts are rate limited to 8 per 15
+  minutes per IP — six digits is only a million guesses.
+- Users can always bring their own key in Settings instead, gate or no gate.
+- With `ACCESS_PIN` unset the gate disappears entirely, which is what you want locally.
+- Set `SESSION_SECRET` explicitly in production. Without it the signing secret is derived
+  from the PIN, so changing the PIN invalidates every existing session.
+
+> [!CAUTION]
+> Put `ACCESS_PIN` in your hosting provider's environment variables — never in the repo,
+> and never in a committed test. A PIN in a public repository is not a gate.
+
 
 ---
 
@@ -210,6 +238,8 @@ Set your API key in the Vercel project's environment variables, or let users sup
 |---|---|---|
 | `GET` | `/` | The web UI |
 | `GET` | `/api/health` | Health check |
+| `GET` | `/api/auth/status` | Whether this deployment gates its key, and whether you are in |
+| `POST` | `/api/auth` | Exchange the access PIN for a session token |
 | `GET` | `/api/templates` | List built-in templates |
 | `GET` | `/api/templates/{id}/preview.pdf` | Compiled template preview |
 | `POST` | `/api/tailor/stream` | Run the full agent loop (SSE) |

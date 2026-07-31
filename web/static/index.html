@@ -30,6 +30,23 @@
       <button class="linklike" id="profile-btn">Edit dossier</button>
       <button class="linklike" id="settings-btn">Settings</button>
 
+      <!-- Access gate. Hidden entirely when the deployment sets no ACCESS_PIN. -->
+      <div class="gate" id="gate" hidden>
+        <form class="gate-form" id="gate-form" autocomplete="off">
+          <label class="meta gate-label" for="pin-input">ACCESS PIN</label>
+          <div class="gate-row">
+            <input type="password" id="pin-input" inputmode="numeric" autocomplete="off"
+                   placeholder="••••••" aria-label="Access PIN">
+            <button class="btn gate-go" type="submit" id="pin-submit">→</button>
+          </div>
+          <div class="gate-msg meta" id="gate-msg" hidden></div>
+        </form>
+        <div class="gate-ok meta" id="gate-ok" hidden>
+          <span class="dot good"></span> UNLOCKED
+          <button class="linklike" id="gate-lock">lock</button>
+        </div>
+      </div>
+
       <a class="repo-link" id="repo-link" href="https://github.com/udsy19/resume-builder"
          target="_blank" rel="noopener noreferrer">
         <svg class="gh-mark" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">

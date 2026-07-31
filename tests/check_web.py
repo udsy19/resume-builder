@@ -9,6 +9,7 @@ Uses FastAPI's TestClient, so nothing binds a port and nothing reaches a provide
 The streaming endpoints are exercised only up to the point where they would call a
 model — enough to prove validation and limits behave.
 """
+import os
 import sys
 from pathlib import Path
 
@@ -121,6 +122,67 @@ def main():
                 break
         assert seen_429, f"no 429 after {limit + 2} requests against a limit of {limit}"
     check("rate limit actually returns 429", limit_enforced)
+
+    print("access gate:")
+
+    def gate():
+        """The gate is a security boundary, so it is tested as one.
+
+        Without it a deployed instance hands its own API key to every visitor: the
+        provider falls back to the environment whenever a request carries no key.
+        """
+        import importlib
+        import hashlib
+        import hmac as _hmac
+        import time as _time
+
+        # A throwaway PIN invented for this test. The deployment's real PIN lives
+        # only in the hosting environment — putting it here would publish it.
+        test_pin = "918273"
+        os.environ["ACCESS_PIN"] = test_pin
+        try:
+            gated = importlib.reload(webapp)
+            gc = TestClient(gated.app)
+
+            assert gated.ACCESS_PIN, "gate did not pick up ACCESS_PIN"
+            assert gc.get("/api/auth/status").json() == {"gate": "enabled", "unlocked": False}
+
+            # A wrong PIN is refused, and the response never contains the real one.
+            bad = gc.post("/api/auth", json={"pin": "000000"})
+            assert bad.status_code == 401, bad.status_code
+            assert test_pin not in bad.text, "the PIN leaked in an error response"
+
+            # The endpoints that spend money are closed while locked.
+            r = gc.post("/api/tailor/stream", data={"job_description": "Engineer", "dump_text": "me"})
+            assert r.status_code == 401, f"locked tailor endpoint returned {r.status_code}"
+
+            # The right PIN opens them, and hands back no key.
+            ok = gc.post("/api/auth", json={"pin": test_pin})
+            assert ok.status_code == 200, ok.status_code
+            token = ok.json()["token"]
+            assert token, "no token issued"
+            assert "sk-" not in ok.text, "an API key leaked into the auth response"
+            assert gc.get("/api/auth/status", headers={"X-Access-Token": token}).json()["unlocked"]
+
+            # A forged signature and an expired token are both rejected.
+            forged = token.split(".")[0] + "." + "0" * 64
+            assert not gc.get("/api/auth/status", headers={"X-Access-Token": forged}).json()["unlocked"], \
+                "a forged token was accepted"
+            past = str(int(_time.time()) - 10)
+            sig = _hmac.new(gated._SESSION_SECRET.encode(), past.encode(), hashlib.sha256).hexdigest()
+            assert not gc.get("/api/auth/status",
+                              headers={"X-Access-Token": f"{past}.{sig}"}).json()["unlocked"], \
+                "an expired token was accepted"
+        finally:
+            os.environ.pop("ACCESS_PIN", None)
+            importlib.reload(webapp)
+    check("PIN gate protects the server's API key", gate)
+
+    def gate_off_by_default():
+        """A local checkout with no ACCESS_PIN must behave exactly as before."""
+        assert not webapp.ACCESS_PIN
+        assert client.get("/api/auth/status").json() == {"gate": "disabled", "unlocked": True}
+    check("gate is disabled when no PIN is configured", gate_off_by_default)
 
     print()
     if failures:
