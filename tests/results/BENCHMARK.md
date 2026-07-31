@@ -359,3 +359,28 @@ escape hatch working as intended rather than a regression.
 
 `REFINE_CYCLE_SECONDS` drops 190 → 110 to match, so the loop now starts cycles it would
 previously have refused for lack of time.
+
+## VPS deployment — end-to-end verification
+
+First run on the production host (Ubuntu 24.04, local TeX, no request ceiling), with the
+full `RUN_BUDGET_SECONDS=900` the platform can finally afford.
+
+```
+FINAL   score=80/100  verdict=revise  time=681s
+must_have    100.0%  missing=[]
+SCORES  {"keyword_match": 28, "ats_compliance": 17, "truthfulness": 18,
+         "page_fit": 7, "writing_quality": 10}
+PASSES  [72, 67, 80, 77]
+```
+
+- **Exactly one page**, confirmed by counting the pages of the emitted PDF, not by
+  trusting the score.
+- **100% must-have keyword coverage** — three refine cycles inside the budget, which is
+  what coverage costs. The same fixture on Vercel's 250s ceiling reached 82%.
+- **truthfulness 18/20** on Anthropic, against 4/20 for the OpenAI run on this fixture.
+- The champion held at 80 when the fourth pass came back at 77.
+- `writing_quality 10` is the computed lens reporting honestly; it is not comparable to
+  the pre-v6 numbers, which were a judge parked on 15.
+
+The deployment also survived what the run did to it: the service stayed active throughout,
+and the two unrelated applications sharing the host were unaffected.
