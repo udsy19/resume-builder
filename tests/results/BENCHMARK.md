@@ -418,3 +418,41 @@ is a small loss while an invented result is a lie on someone's resume.
 
 The lesson generalises: a repair pass that adds content is not safe to run repeatedly just
 because each individual repair looked correct.
+
+## v9 — repair bounded to one pass
+
+Same fixture, provider, aggressiveness and budget throughout. One run per configuration.
+
+| | baseline | v8 (repair ×3) | v9 (repair ×1) |
+|---|---|---|---|
+| **total** | **80** | 77 | **80** |
+| truthfulness | 18 | 13 | **18** |
+| page_fit | 7 | 8 | **9** |
+| ats_compliance | 17 | 17 | **18** |
+| keyword_match | 28 | 26 | 27 |
+| writing_quality | 10 | **13** | 8 |
+| coverage | 100% | 93.8% | **100%** |
+| time | 681 s | 902 s | 759 s |
+
+The regression is repaired: truthfulness back to 18, coverage back to 100%, total back to 80.
+
+**What the three runs actually show, stated plainly.**
+
+- `page_fit` improved monotonically, 7 → 8 → 9, and it is the one category driven by a
+  deterministic measurement rather than a judge. That is the only change here that looks
+  like a real, repeatable gain.
+- `writing_quality` went 10 → 13 → 8 across the three runs. It is computed from defects
+  the judge *enumerates*, so it inherits the judge's variance in how many it chooses to
+  list. A three-point swing in either direction is not evidence of anything at n=1, and
+  the honest reading is that these runs do not establish that writing repair improves it.
+- The **trade is real** even if the magnitudes are not settled: more repair passes bought
+  writing quality and cost truthfulness, in the same direction both times. That direction
+  is worth trusting more than either number.
+- **Total did not improve.** 80 before, 80 after. The interventions aimed at the score did
+  not raise the score.
+
+**What did improve, independent of scoring:** compilation no longer blocks the event loop,
+runs survive a closed tab, cost is visible, and the audit is skipped when it has nothing to
+do. Those are worth having whatever the rubric says.
+
+Establishing whether writing repair helps needs repeated runs per configuration, not one.
