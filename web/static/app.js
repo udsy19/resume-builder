@@ -128,14 +128,42 @@ $("new-session-btn").addEventListener("click", () => {
 
 function renderAll() { renderRail(); renderDesk(); }
 
+// The heat field is torn down and remounted with the plate it lives on, so its
+// ResizeObserver and pointer listeners never outlive the canvas they were bound to.
+let stopHeat = null;
+
 function renderDesk() {
   const s = activeSession();
   const desk = $("desk");
+  if (stopHeat) { stopHeat(); stopHeat = null; }
   if (!s) { desk.innerHTML = ""; return; }
-  if (s.status === "draft") return renderDraft(desk, s);
+  if (s.status === "draft") { renderDraft(desk, s); return mountHeat(); }
   if (s.status === "running") return renderRunning(desk, s);
   if (s.status === "done") return renderDone(desk, s);
   return renderStopped(desk, s); // error | interrupted
+}
+
+function mountHeat() {
+  const canvas = $("heat");
+  if (!canvas || !window.__mountHeatField) return;
+  stopHeat = window.__mountHeatField(canvas);
+}
+
+/* ── Repo star count ──
+   Public, unauthenticated call; the count is decoration, so any failure (rate limit,
+   private repo, offline) just leaves the link without a number rather than erroring. */
+async function loadStars() {
+  try {
+    const r = await fetch("https://api.github.com/repos/udsy19/resume-builder");
+    if (!r.ok) return;
+    const { stargazers_count } = await r.json();
+    if (typeof stargazers_count !== "number") return;
+    const el = $("repo-stars");
+    el.textContent = stargazers_count >= 1000
+      ? (stargazers_count / 1000).toFixed(1) + "k"
+      : String(stargazers_count);
+    el.hidden = false;
+  } catch { /* no count, no problem */ }
 }
 
 /* ── Draft view ── */
@@ -147,6 +175,8 @@ function renderDraft(desk, s) {
         The agent writes, scores itself, and rewrites until it passes.</div>
       <div class="meta sheet-meta">RESUME BUILDER<br>ROLE SETUP</div>
     </div>
+
+    <div class="field-band"><canvas id="heat"></canvas></div>
 
     <div class="display-line">Point it at <em>the job.</em></div>
 
@@ -1114,6 +1144,7 @@ async function boot() {
     state.templates = (await res.json()).templates;
   } catch { state.templates = [{ id: "udaya", name: "Udaya's Template", description: "Default", default: true }]; }
   renderAll();
+  loadStars();
   if (!state.profile) setTimeout(openProfile, 400);
 }
 

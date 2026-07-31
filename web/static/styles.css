@@ -64,8 +64,11 @@ body {
   gap: 1.1rem;
   position: sticky;
   top: clamp(0.75rem, 1.2vw, 1.25rem);
-  align-self: flex-start;
-  max-height: calc(100svh - 2 * clamp(0.75rem, 1.2vw, 1.25rem));
+  /* Stretch to the plate's full height. Aligned flex-start it ended wherever its content
+     ran out, leaving a tall column of bare ground below it — an orphaned card rather than
+     the ink plate the series pairs against paper. */
+  align-self: stretch;
+  height: calc(100svh - 2 * clamp(0.75rem, 1.2vw, 1.25rem));
 }
 
 .rail-head { display: flex; justify-content: space-between; align-items: flex-start; }
@@ -106,6 +109,45 @@ body {
 
 .rail-foot { border-top: 1px solid rgb(239 237 234 / 0.18); padding-top: 0.9rem; display: flex; flex-direction: column; gap: 6px; }
 .rail-foot .meta { opacity: 0.55; }
+
+/* ── Repo link + author credit ──
+   Sits in the mono metadata register so it reads as part of the plate's furniture
+   rather than a bolted-on badge. */
+.repo-link {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 0.9rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid rgb(239 237 234 / 0.18);
+  color: var(--paper);
+  text-decoration: none;
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.62;
+  transition: opacity 0.18s ease;
+}
+.repo-link:hover { opacity: 1; }
+.repo-link:focus-visible { outline: 1px solid var(--sky); outline-offset: 3px; opacity: 1; }
+.gh-mark { flex-shrink: 0; }
+.repo-label { flex: 1; }
+/* The count only appears once it has actually been fetched, so a rate-limited or
+   offline load shows a clean link instead of a zero. */
+.repo-stars {
+  font-size: 0.6875rem;
+  letter-spacing: 0.04em;
+  padding: 1px 6px;
+  border: 1px solid rgb(239 237 234 / 0.3);
+}
+.repo-stars::before { content: "★ "; }
+
+.rail-credit {
+  margin-top: 0.7rem;
+  opacity: 0.38;
+  line-height: 1.5;
+}
 .profile-status { font-size: 0.82rem; display: flex; align-items: center; gap: 8px; }
 
 /* status dots */
@@ -140,14 +182,39 @@ body {
 .sheet-top { display: flex; justify-content: space-between; gap: 2rem; align-items: flex-start; }
 .sheet-meta { text-align: right; opacity: 0.65; flex-shrink: 0; }
 
+/* Display type carries the system. The old clamp topped out at 3.6rem, which read as a
+   large heading rather than the poster-scale statement the series is built around. */
 .display-line {
   font-family: var(--serif);
-  font-size: clamp(2rem, 4.6vw, 3.6rem);
-  line-height: 0.98;
-  letter-spacing: -0.02em;
-  max-width: 18ch;
+  font-size: clamp(2.5rem, 6.4vw, 6.25rem);
+  line-height: 0.92;
+  letter-spacing: -0.025em;
+  max-width: 15ch;
 }
 .display-line em { font-style: normal; color: var(--accent); }
+
+/* ── The heat field ──
+   The system's signature visual, and the thing this page was missing: without it every
+   surface was the same furniture-only plate, which the design system calls a template
+   rather than a series. The canvas is absolutely positioned so it never participates in
+   intrinsic sizing — a canvas with width/height attributes carries an aspect ratio and
+   will otherwise claim a height of its own and blow the sheet open. */
+.field-band {
+  position: relative;
+  height: clamp(150px, 22vh, 260px);
+  margin: 0 calc(-1 * clamp(1.5rem, 2.6vw, 2.75rem));
+  border-top: 1px solid color-mix(in srgb, var(--figure) 18%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--figure) 18%, transparent);
+  overflow: hidden;
+}
+.field-band canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;   /* one ImageData pixel per cell, upscaled hard */
+  display: block;
+}
 
 /* ══ Forms ══ */
 
@@ -532,9 +599,14 @@ details.advanced[open] summary { margin-bottom: 14px; }
     width: auto;
     position: static;
     max-height: none;
+    /* Stacked above the desk, a full-height rail would fill the viewport and push the
+       form entirely below the fold. Height goes back to the content here. */
+    height: auto;
+    align-self: auto;
     margin: clamp(0.75rem, 1.6vw, 1.25rem);
     margin-bottom: 0;
   }
+  .session-list { flex: none; }
   .result-grid, .work-grid, .form-grid, .run-split { grid-template-columns: 1fr; }
   .preview-box { height: 420px; }
   .kw-live { max-height: 340px; }
