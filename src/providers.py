@@ -28,6 +28,26 @@ class ProviderError(Exception):
     pass
 
 
+# A long streamed generation can stall mid-body. Left alone the transport raises
+# httpx.ReadTimeout, which is not a ProviderError, so it escaped every degradation path
+# in the agent and killed an otherwise healthy run outright. Streaming calls get a
+# generous read window and the SDKs retry connection failures themselves.
+REQUEST_TIMEOUT_SECONDS = float(os.environ.get("PROVIDER_TIMEOUT_SECONDS", "180"))
+MAX_RETRIES = int(os.environ.get("PROVIDER_MAX_RETRIES", "3"))
+
+
+def _as_provider_error(exc: Exception) -> "ProviderError":
+    """Normalise transport and SDK failures so callers can degrade instead of crashing."""
+    name = type(exc).__name__
+    if "Timeout" in name:
+        return ProviderError("The model took too long to respond — the request timed out.")
+    if "Connect" in name or "Network" in name:
+        return ProviderError("Could not reach the model provider — check the network.")
+    if "RateLimit" in name:
+        return ProviderError("Rate limited by the model provider — try again shortly.")
+    return ProviderError(f"{name}: {exc}")
+
+
 @dataclass
 class Usage:
     input_tokens: int = 0
@@ -63,7 +83,8 @@ class AnthropicProvider(Provider):
         if not key:
             raise ProviderError("ANTHROPIC_API_KEY is not set.")
         self.model = model or self.DEFAULT_MODEL
-        self.client = anthropic.AsyncAnthropic(api_key=key)
+        self.client = anthropic.AsyncAnthropic(
+            api_key=key, timeout=REQUEST_TIMEOUT_SECONDS, max_retries=MAX_RETRIES)
 
     async def stream(self, *, phase, system, blocks, schema, effort, max_tokens):
         kwargs = dict(
@@ -130,7 +151,8 @@ class OpenAIProvider(Provider):
         if not key:
             raise ProviderError("OPENAI_API_KEY is not set.")
         self.model = model or self.DEFAULT_MODEL
-        self.client = AsyncOpenAI(api_key=key)
+        self.client = AsyncOpenAI(
+            api_key=key, timeout=REQUEST_TIMEOUT_SECONDS, max_retries=MAX_RETRIES)
 
     def _effort(self, effort: str) -> str:
         if any(self.model.startswith(m) for m in _OPENAI_FULL_EFFORT):

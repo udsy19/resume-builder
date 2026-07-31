@@ -7,5 +7,8 @@
       "maxDuration": 300,
       "includeFiles": "{templates,web,src}/**"
     }
+  },
+  "env": {
+    "RUN_BUDGET_SECONDS": "250"
   }
 }

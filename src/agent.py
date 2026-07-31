@@ -27,16 +27,22 @@ from . import prompts
 from .latex import (LINE_COST_PT, bullets_to_expand, bullets_with_widows, craft_defects, bullets_to_tighten, compile_pdf, fit_to_one_page,
                     line_arithmetic, measure_fit, replace_bullets, skeleton_line_budget)
 from . import repair
-from .providers import ProviderError, make_provider
+from .providers import ProviderError, _as_provider_error, make_provider
 from .validator import keyword_in_text, run_checks, score_craft, spacing_crush_reason
 
 MODEL = "claude-opus-5"
 MAX_TOKENS = 32000
 JUDGE_NOISE_PTS = 3  # measured: sd 1.17, spread 3 over k=5 identical re-scores
 PASS_THRESHOLD = 95  # out of 100 — the ResumeWorded/VMock bar, not "good enough"
-# Soft deadline: ship the best draft before a serverless timeout kills the run.
-# Override with RUN_BUDGET_SECONDS for long local runs that should keep refining.
-RUN_BUDGET_SECONDS = int(os.environ.get("RUN_BUDGET_SECONDS", "250"))
+# Wall-clock ceiling for a whole run. The default is what a COMPLETE run costs, measured:
+# ~130s to analyse and generate, ~60s of deterministic polish, then four evaluate/refine
+# cycles. Keyword coverage is what those later cycles buy — at two cycles it measured
+# 82%, at four, 100% — so a smaller budget does not buy a faster resume, it buys a worse
+# one. Serverless deployments that cannot run this long must set RUN_BUDGET_SECONDS to
+# their platform ceiling and accept a reduced loop; run() says so explicitly when they do.
+RUN_BUDGET_SECONDS = int(os.environ.get("RUN_BUDGET_SECONDS", "900"))
+# Below this there is not enough room for the refine cycles that land the last keywords.
+FULL_LOOP_SECONDS = 900
 # The budget covers the WHOLE run, so the closing phases have to be paid for out of it.
 # Measured on live runs: the one-page fit solver, widow repair and audit together cost
 # ~80s. The loop stops that far short of the deadline so it can still afford them —
@@ -227,16 +233,28 @@ class ResumeAgent:
         sections_seen: List[str] = []
         text_so_far = ""
         result = None
-        async for ev in self.provider.stream(
+        # Transport failures arrive as raw httpx exceptions, not ProviderError, so they
+        # used to sail past every degradation path and abort an otherwise healthy run —
+        # a single stalled read during tightening killed a full live run. Normalising them
+        # here, at the one chokepoint every phase goes through, lets callers degrade.
+        stream = self.provider.stream(
             phase=phase, system=system, blocks=blocks, schema=output_schema,
             effort=EFFORT.get(phase, "high"), max_tokens=MAX_TOKENS,
-        ):
-            if ev["event"] == "done":
-                result = ev
-            elif ev["event"] == "writing":
-                yield {"event": "writing", "phase": phase, "section": None, "chars": ev["chars"]}
-            else:
-                yield ev
+        )
+        try:
+            async for ev in stream:
+                if ev["event"] == "done":
+                    result = ev
+                elif ev["event"] == "writing":
+                    yield {"event": "writing", "phase": phase, "section": None, "chars": ev["chars"]}
+                else:
+                    yield ev
+        except (ProviderError, AgentError):
+            raise
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            raise _as_provider_error(e) from e
 
         if result is None:
             raise AgentError("The model returned nothing.")
@@ -399,16 +417,23 @@ class ResumeAgent:
                 for t in todo
             )
             result = None
-            async for ev in self._stream_call(
-                phase="tighten", system=prompts.TIGHTEN_SYSTEM,
-                messages=[{"role": "user", "content": prompts.TIGHTEN_PROMPT.format(
-                    n=len(todo), bullets=listing)}],
-                output_schema=prompts.TIGHTEN_SCHEMA,
-            ):
-                if ev["event"] == "message":
-                    result = _parse_json(_text_of(ev["message"]))
-                else:
-                    yield {"step": "live", **ev}
+            try:
+                async for ev in self._stream_call(
+                    phase="tighten", system=prompts.TIGHTEN_SYSTEM,
+                    messages=[{"role": "user", "content": prompts.TIGHTEN_PROMPT.format(
+                        n=len(todo), bullets=listing)}],
+                    output_schema=prompts.TIGHTEN_SCHEMA,
+                ):
+                    if ev["event"] == "message":
+                        result = _parse_json(_text_of(ev["message"]))
+                    else:
+                        yield {"step": "live", **ev}
+            except (ProviderError, AgentError) as e:
+                # Tightening is deterministic polish; the one-page guarantee is enforced
+                # again by the fit solver at the end, so a failed round is survivable.
+                yield {"step": "skipped", "phase": "tighten",
+                       "message": f"Tightening round failed ({e}) — continuing."}
+                break
 
             targets = {t["index"]: t["target"] for t in todo}
             accepted = {
@@ -461,15 +486,21 @@ class ResumeAgent:
             prompt = prompts.EXPAND_PROMPT.format(
                 lines=round(lines_free, 1), n=len(todo), keyword_note=kw_note, bullets=listing)
             result = None
-            async for ev in self._stream_call(
-                phase="expand", system=prompts.EXPAND_SYSTEM,
-                messages=[{"role": "user", "content": dump.as_content_blocks(prompt)}],
-                output_schema=prompts.EXPAND_SCHEMA,
-            ):
-                if ev["event"] == "message":
-                    result = _parse_json(_text_of(ev["message"]))
-                else:
-                    yield {"step": "live", **ev}
+            try:
+                async for ev in self._stream_call(
+                    phase="expand", system=prompts.EXPAND_SYSTEM,
+                    messages=[{"role": "user", "content": dump.as_content_blocks(prompt)}],
+                    output_schema=prompts.EXPAND_SCHEMA,
+                ):
+                    if ev["event"] == "message":
+                        result = _parse_json(_text_of(ev["message"]))
+                    else:
+                        yield {"step": "live", **ev}
+            except (ProviderError, AgentError) as e:
+                # Page fill is optional; an under-filled page still ships.
+                yield {"step": "skipped", "phase": "expand",
+                       "message": f"Page fill failed ({e}) — continuing."}
+                break
 
             index = {t["index"]: t for t in todo}
             accepted = {
@@ -560,6 +591,13 @@ class ResumeAgent:
         aggressiveness = max(1, min(3, int(aggressiveness)))
         self._clock = _Clock(RUN_BUDGET_SECONDS)
         clock = self._clock
+        if RUN_BUDGET_SECONDS < FULL_LOOP_SECONDS:
+            # Silent truncation would read as a complete run that simply scored lower.
+            yield {"step": "reduced_loop", "phase": "analyze",
+                   "message": f"Time budget is {RUN_BUDGET_SECONDS}s; a full loop needs about "
+                              f"{FULL_LOOP_SECONDS}s. This run will stop early, and the last "
+                              "few job-description keywords are the part most likely to be missing.",
+                   "data": {"budget_seconds": RUN_BUDGET_SECONDS, "full_loop_seconds": FULL_LOOP_SECONDS}}
 
         # ── 1. JD analysis ──
         yield {"step": "analyzing", "phase": "analyze",

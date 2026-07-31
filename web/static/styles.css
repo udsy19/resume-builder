@@ -764,3 +764,14 @@ details.advanced[open] summary { margin-bottom: 14px; }
   .stat:nth-child(2) { border-right: none; }
   .stat:nth-child(-n+2) { border-bottom: 1px solid color-mix(in srgb, var(--figure) 40%, transparent); }
 }
+
+/* A run that stopped early must say so on the result plate, not only in the log the
+   user has already scrolled past. Signal red, because it changes how to read the score. */
+.notice {
+  border-left: 3px solid var(--signal);
+  padding: 0.7rem 0.9rem;
+  background: color-mix(in srgb, var(--signal) 7%, transparent);
+  font-size: 0.85rem;
+  line-height: 1.5;
+  max-width: 62ch;
+}

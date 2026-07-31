@@ -209,6 +209,32 @@ def main():
             "craft judge is still being asked to score writing_quality directly"
     check("writing_quality is computed and discriminates", craft_discriminates)
 
+    def transport_errors_degrade():
+        """A stalled read must not abort a healthy run.
+
+        A live OpenAI run died on httpx.ReadTimeout during tightening: transport
+        exceptions are not ProviderError, so they escaped every degradation path.
+        """
+        import httpx
+        from src.providers import _as_provider_error, ProviderError
+
+        for exc in (httpx.ReadTimeout("stalled"), httpx.ConnectError("no route"),
+                    httpx.RemoteProtocolError("truncated")):
+            out = _as_provider_error(exc)
+            assert isinstance(out, ProviderError), f"{type(exc).__name__} not normalised"
+            assert str(out), "normalised error carries no message"
+
+        # The polish phases must catch ProviderError so a failed round is survivable.
+        src = (ROOT / "src" / "agent.py").read_text()
+        for phase in ("_tighten", "_expand"):
+            body = src.split(f"async def {phase}(")[1].split("\n    async def ")[0]
+            assert "except (ProviderError, AgentError)" in body, \
+                f"{phase} does not degrade on a provider failure"
+        # And _stream_call must normalise anything the provider lets through.
+        call = src.split("async def _stream_call(")[1].split("\n    async def ")[0]
+        assert "_as_provider_error" in call, "_stream_call does not normalise transport errors"
+    check("transport failures degrade instead of aborting the run", transport_errors_degrade)
+
     print()
     if failures:
         print(f"{len(failures)} FAILURE(S): {', '.join(failures)}")

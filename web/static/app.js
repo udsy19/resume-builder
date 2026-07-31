@@ -538,6 +538,8 @@ function renderDone(desk, s) {
 
     <div class="display-line">${esc(r.jd_analysis.role_title || s.name)}<em>${r.jd_analysis.company ? " @ " + esc(r.jd_analysis.company) : ""}</em></div>
 
+    ${s.reducedLoop ? `<div class="notice">${esc(s.reducedLoop)}</div>` : ""}
+
     <div class="result-grid">
       <div class="score-block">
         <div class="score-num ${r.score >= 88 ? "good" : r.score >= 70 ? "ok" : "bad"}">${r.score}<small>/100</small></div>
@@ -800,6 +802,18 @@ function handleRunUpdate(s, u) {
       break;
     case "degraded":
       pushLog(s, u.message, "error");
+      break;
+    case "reduced_loop":
+      // Flagged up front, and kept on the session so the result plate can repeat it —
+      // a run that stopped early should never be presented as a finished one.
+      s.reducedLoop = u.message;
+      pushLog(s, u.message, "error");
+      break;
+    case "skipped":
+      pushLog(s, u.message, "error");
+      break;
+    case "craft_scored":
+      pushLog(s, u.message);
       break;
     case "evaluated": {
       const d = u.data;
