@@ -119,13 +119,6 @@
   </div>
 </dialog>
 
-<!-- The field is an ES module; app.js is a classic script, so it is handed over on
-     window. Loaded first so the mount point exists before the first render. -->
-<script type="module">
-  import { mountHeatField } from '/static/heatfield.js';
-  window.__mountHeatField = mountHeatField;
-  window.dispatchEvent(new Event('heatfield-ready'));
-</script>
 <script src="/static/app.js"></script>
 </body>
 </html>

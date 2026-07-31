@@ -23,7 +23,9 @@ resume.udsy.in, resume.46.202.179.28.sslip.io {
 	header {
 		Strict-Transport-Security "max-age=31536000"
 		X-Content-Type-Options "nosniff"
-		X-Frame-Options "DENY"
+		# SAMEORIGIN, not DENY: DENY blocks framing even from our own origin, which
+		# broke the template preview iframes. This still stops third-party clickjacking.
+		X-Frame-Options "SAMEORIGIN"
 		Referrer-Policy "strict-origin-when-cross-origin"
 	}
 }

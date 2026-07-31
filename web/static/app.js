@@ -128,25 +128,14 @@ $("new-session-btn").addEventListener("click", () => {
 
 function renderAll() { renderRail(); renderDesk(); }
 
-// The heat field is torn down and remounted with the plate it lives on, so its
-// ResizeObserver and pointer listeners never outlive the canvas they were bound to.
-let stopHeat = null;
-
 function renderDesk() {
   const s = activeSession();
   const desk = $("desk");
-  if (stopHeat) { stopHeat(); stopHeat = null; }
   if (!s) { desk.innerHTML = ""; return; }
-  if (s.status === "draft") { renderDraft(desk, s); return mountHeat(); }
+  if (s.status === "draft") return renderDraft(desk, s);
   if (s.status === "running") return renderRunning(desk, s);
   if (s.status === "done") return renderDone(desk, s);
   return renderStopped(desk, s); // error | interrupted
-}
-
-function mountHeat() {
-  const canvas = $("heat");
-  if (!canvas || !window.__mountHeatField) return;
-  stopHeat = window.__mountHeatField(canvas);
 }
 
 /* ── Repo star count ──
@@ -175,8 +164,6 @@ function renderDraft(desk, s) {
         The agent writes, scores itself, and rewrites until it passes.</div>
       <div class="meta sheet-meta">RESUME BUILDER<br>ROLE SETUP</div>
     </div>
-
-    <div class="field-band"><canvas id="heat"></canvas></div>
 
     <div class="display-line">Point it at <em>the job.</em></div>
 
