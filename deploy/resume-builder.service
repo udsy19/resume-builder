@@ -1,0 +1,40 @@
+[Unit]
+Description=Resume Builder — agentic one-page LaTeX resumes
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=resume
+Group=resume
+WorkingDirectory=/opt/resume-builder
+
+# Secrets live here, root-owned and 0600. Never in the repo.
+EnvironmentFile=/etc/resume-builder.env
+
+# A full run is ~15 minutes of model calls; nothing here should cut that short.
+ExecStart=/opt/resume-builder/.venv/bin/uvicorn web.app:app \
+    --host 127.0.0.1 --port 8000 \
+    --timeout-keep-alive 1200 \
+    --workers 1
+
+Restart=always
+RestartSec=5
+
+# The app compiles LaTeX in temp dirs and reads its own tree; it needs nothing else.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/resume-builder
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=resume-builder
+
+[Install]
+WantedBy=multi-user.target

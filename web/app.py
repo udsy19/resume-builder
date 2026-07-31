@@ -31,7 +31,7 @@ from pydantic import BaseModel, Field
 
 from src.agent import AgentError, ResumeAgent
 from src.ingest import Dump, ingest_file
-from src.latex import DANGEROUS as _LATEX_DANGEROUS, compile_pdf
+from src.latex import DANGEROUS as _LATEX_DANGEROUS, compile_pdf, find_pdflatex
 from src.templates import get_template, list_templates, validate_custom_template
 
 app = FastAPI(title="ATS Resume Builder", version="4.0.0")
@@ -214,9 +214,27 @@ async def root():
     return HTMLResponse(content=(static_path / "index.html").read_text())
 
 
+# Serving the UI here too is deliberate. Vercel changed internal rewrites to route by
+# the rewritten destination path, so a catch-all rewrite delivered every request to the
+# app as "/api/index" — nothing matched, and the site came up blank with no clue why.
+# vercel.json now uses routes, which preserve the original path, and this keeps the page
+# reachable if any host ever rewrites that way again.
+@app.get("/api/index", response_class=HTMLResponse)
+async def root_rewritten():
+    return HTMLResponse(content=(static_path / "index.html").read_text())
+
+
 @app.get("/api/health")
-async def health_check():
-    return {"status": "healthy", "version": "4.0.0"}
+async def health_check(request: Request):
+    return {
+        "status": "healthy",
+        "version": "4.0.0",
+        # Echoed so a routing misconfiguration is visible from outside: if this is not
+        # "/api/health", something between the client and the app is rewriting paths.
+        "received_path": request.url.path,
+        "pdflatex": bool(find_pdflatex()),
+        "gate": "enabled" if ACCESS_PIN else "disabled",
+    }
 
 
 @app.get("/api/templates")

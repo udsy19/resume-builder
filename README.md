@@ -233,10 +233,37 @@ session token, and only requests carrying a valid token may use the server's key
 
 ## Deployment
 
+### A VPS or container host (recommended)
+
+This app needs two things a serverless platform cannot give it: a real `pdflatex`, and
+requests that can run for ~15 minutes. On a host that provides both, the full loop runs
+and you get the numbers at the top of this README.
+
+```bash
+git clone https://github.com/udsy19/resume-builder.git
+sudo bash resume-builder/deploy/setup-vps.sh
+```
+
+The script installs the TeX packages the templates need, creates a service user, builds a
+virtualenv, runs the offline checks as a gate, installs a hardened systemd unit, and
+configures nginx with TLS. Two nginx settings in [`deploy/nginx-resume.conf`](deploy/nginx-resume.conf)
+are load-bearing: buffering is off so Server-Sent Events stream in real time, and the read
+timeout outlasts a full run so nginx does not kill a generation mid-flight.
+
+Secrets go in `/etc/resume-builder.env` (root-owned, `0600`) — never in the repo. Point
+your domain's A record at the host **before** running the script, or certbot cannot issue
+a certificate.
+
+### Vercel
+
+
 The repo deploys to Vercel as-is: [`vercel.json`](vercel.json) rewrites everything to the serverless function [`api/index.py`](api/index.py), bundles `templates/`, `web/`, and `src/`, sets a 300 s function timeout, and pins `RUN_BUDGET_SECONDS` to 250 so a run ships its best draft before that timeout.
 
-> [!NOTE]
-> **300 s fits roughly one evaluation pass and no refinement.** To get the full loop, run it somewhere without a per-request ceiling — a background worker, a job queue, or any host that allows ~15-minute requests. The app is explicit in the UI when it is running a reduced loop.
+> [!WARNING]
+> **Vercel cannot run this app properly, for two independent reasons.** There is no
+> `pdflatex`, so the one-page guarantee — the core of the product — cannot work unless you
+> set `ALLOW_ONLINE_COMPILER=1`, which sends every document to a third party. And 300 s
+> fits roughly one evaluation pass and no refinement. To get the full loop, run it somewhere without a per-request ceiling — a background worker, a job queue, or any host that allows ~15-minute requests. The app is explicit in the UI when it is running a reduced loop.
 
 Set your API key in the Vercel project's environment variables, or let users supply their own in the UI.
 

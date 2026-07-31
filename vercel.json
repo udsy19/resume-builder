@@ -1,13 +1,13 @@
 {
-  "rewrites": [
-    { "source": "/(.*)", "destination": "/api/index" }
-  ],
   "functions": {
     "api/index.py": {
       "maxDuration": 300,
       "includeFiles": "{templates,web,src}/**"
     }
   },
+  "routes": [
+    { "src": "/(.*)", "dest": "/api/index" }
+  ],
   "env": {
     "RUN_BUDGET_SECONDS": "250"
   }
