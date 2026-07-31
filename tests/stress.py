@@ -291,6 +291,86 @@ def main():
         assert "<b>SIEM</b>" in inline and "<code>grep</code>" in inline, inline
     check("reasoning stream renders markdown without rendering HTML", thinking_renderer_is_safe)
 
+    def compiles_do_not_block_the_loop():
+        """A compile must not freeze every other user's stream.
+
+        compile_pdf is async but shelled out synchronously, so each of the 15-30 compiles
+        in a run froze the whole event loop — on a single-worker server that stalls other
+        users' SSE streams, including the keepalives holding their connections open.
+        """
+        import asyncio as aio
+        from src.latex import compile_pdf, find_pdflatex
+        from src.templates import get_template
+
+        if not find_pdflatex():
+            return                                   # nothing to measure without TeX
+        tex = get_template("udaya").read()
+
+        async def drive():
+            ticks = 0
+            stop = False
+
+            async def ticker():
+                nonlocal ticks
+                while not stop:
+                    ticks += 1
+                    await aio.sleep(0.02)
+
+            tk = aio.create_task(ticker())
+            await compile_pdf(tex)
+            stop = True
+            await aio.sleep(0)
+            tk.cancel()
+            return ticks
+
+        ticks = aio.run(drive())
+        # A ~0.5s compile leaves room for many 20ms ticks; a blocked loop yields ~1.
+        assert ticks > 5, f"event loop was blocked during compilation ({ticks} ticks)"
+    check("LaTeX compilation does not block the event loop", compiles_do_not_block_the_loop)
+
+    def runs_survive_a_dropped_client():
+        """A run is fifteen minutes of paid work; a closed tab must not destroy it."""
+        import asyncio as aio
+
+        async def drive():
+            rid = webapp._new_run()
+            for i in range(3):
+                webapp._record(rid, {"step": "phase", "n": i})
+
+            class Req:
+                async def is_disconnected(self): return False
+
+            # Rejoin having already seen the first event: replay must resume at 1.
+            resp = await webapp.run_replay(rid, Req(), offset=1)
+            seen = []
+
+            async def pump():
+                async for chunk in resp.body_iterator:
+                    if chunk.startswith("data:"):
+                        seen.append(chunk)
+                        if len(seen) == 2:
+                            webapp._record(rid, {"step": "result"})
+                        if len(seen) >= 3:
+                            return
+            await aio.wait_for(pump(), timeout=15)
+            return seen, webapp._runs[rid]["done"]
+
+        seen, done = aio.run(drive())
+        assert len(seen) == 3, f"replay returned {len(seen)} events"
+        assert '"n": 1' in seen[0], f"replay did not honour the offset: {seen[0]}"
+        assert done, "the run was not marked finished"
+
+        # An unknown run is a clean 404, not a hang.
+        r = client.get("/api/runs/does-not-exist/stream")
+        assert r.status_code == 404, r.status_code
+
+        # Memory stays bounded.
+        for _ in range(webapp.MAX_RUNS + 8):
+            webapp._new_run()
+        assert len(webapp._runs) <= webapp.MAX_RUNS, f"run store grew to {len(webapp._runs)}"
+        webapp._runs.clear()
+    check("runs survive a dropped client and stay bounded", runs_survive_a_dropped_client)
+
     print()
     if failures:
         print(f"{len(failures)} FAILURE(S): {', '.join(failures)}")

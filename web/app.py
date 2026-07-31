@@ -12,6 +12,7 @@ import hmac
 import json
 import os
 import re
+import secrets
 import subprocess
 import sys
 import tempfile
@@ -408,6 +409,75 @@ async def _keepalive(source):
             task.cancel()
 
 
+# ── Resumable runs ───────────────────────────────────────────────────
+#
+# A run is fifteen minutes of paid work whose only record lived in one browser tab.
+# A reload, a closed laptop, or a dropped connection destroyed it with the credits
+# already spent. Every event is now also kept server-side under a run id, so a client
+# can reconnect and replay what it missed, and the run keeps going regardless of
+# whether anyone is listening.
+#
+# Deliberately in memory: it survives the thing that actually happens (a client going
+# away) rather than the thing that rarely does (a server restart), and it needs no
+# database. See the WORKERS note in deploy/resume-builder.service — this is one of the
+# two reasons the service runs a single worker.
+RUN_TTL_SECONDS = 3 * 3600
+MAX_RUNS = 40
+_runs: dict = {}
+
+
+def _new_run() -> str:
+    run_id = secrets.token_urlsafe(9)
+    # Evict finished and stale runs before adding another, so memory stays bounded.
+    now = time.monotonic()
+    for rid in [r for r, v in _runs.items() if now - v["started"] > RUN_TTL_SECONDS]:
+        _runs.pop(rid, None)
+    while len(_runs) >= MAX_RUNS:
+        oldest = min(_runs, key=lambda r: _runs[r]["started"])
+        _runs.pop(oldest, None)
+    _runs[run_id] = {"events": [], "done": False, "started": now, "waiters": []}
+    return run_id
+
+
+def _record(run_id: str, payload: dict) -> None:
+    rec = _runs.get(run_id)
+    if rec is None:
+        return
+    rec["events"].append(payload)
+    if payload.get("step") in ("result", "error"):
+        rec["done"] = True
+    for w in rec["waiters"]:
+        w.set()
+    rec["waiters"].clear()
+
+
+@app.get("/api/runs/{run_id}/stream")
+async def run_replay(run_id: str, request: Request, offset: int = 0):
+    """Rejoin a run already in progress, replaying whatever was missed."""
+    rec = _runs.get(run_id)
+    if rec is None:
+        raise HTTPException(status_code=404, detail="That run is no longer available.")
+
+    async def events():
+        sent = max(0, offset)
+        while True:
+            if await request.is_disconnected():
+                return
+            while sent < len(rec["events"]):
+                yield _sse(rec["events"][sent])
+                sent += 1
+            if rec["done"]:
+                return
+            waiter = asyncio.Event()
+            rec["waiters"].append(waiter)
+            try:
+                await asyncio.wait_for(waiter.wait(), timeout=SSE_HEARTBEAT_SECONDS)
+            except asyncio.TimeoutError:
+                yield ": keepalive\n\n"
+
+    return StreamingResponse(events(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
 @app.post("/api/tailor/stream")
 async def tailor_stream(
     request: Request,
@@ -466,7 +536,13 @@ async def tailor_stream(
     # cannot set a status code, because the headers are already on the wire.
     resolved_key, resolved_provider = _resolve_credentials(request, api_key, provider)
 
+    run_id = _new_run()
+
     async def events():
+        # The id goes out first so a client that drops mid-run knows what to rejoin.
+        opener = {"step": "run_started", "run_id": run_id}
+        _record(run_id, opener)
+        yield _sse(opener)
         try:
             agent = ResumeAgent(user_api_key=resolved_key, provider=resolved_provider)
             final = None
@@ -478,6 +554,7 @@ async def tailor_stream(
             ):
                 if await request.is_disconnected():
                     return  # stop burning tokens for a closed tab
+                _record(run_id, update)
                 if update.get("step") == "result" and cover_letter:
                     # Held back so the letter can be attached to it: the UI treats the
                     # result event as the end of the run, and a letter that arrived
@@ -499,11 +576,17 @@ async def tailor_stream(
                     if await request.is_disconnected():
                         return
                     letter = ev.pop("letter", None) or letter
+                    _record(run_id, ev)
                     yield _sse(ev)
                 final["result"]["cover_letter"] = letter
+                _record(run_id, final)
                 yield _sse(final)
         except Exception as e:
-            yield _sse({"step": "error", "message": _friendly_error(e)})
+            # Recorded too, so a client that rejoins learns the run failed rather than
+            # waiting forever on a run that already ended.
+            err = {"step": "error", "message": _friendly_error(e)}
+            _record(run_id, err)
+            yield _sse(err)
 
     return StreamingResponse(
         _keepalive(events()),

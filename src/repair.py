@@ -65,3 +65,50 @@ def format_defects(defects: List[Dict], max_chars: int = 240) -> str:
             f"currently {d['chars']} characters, maximum {max(max_chars, d['chars'])}:\n{d['text']}"
         )
     return "\n\n".join(out)
+
+
+# ── Judge-found writing defects ──────────────────────────────────────
+#
+# The refine loop sends at most six issues per cycle, chosen from twenty to forty found.
+# That cap exists because large simultaneous critique lists caused regressions — but it
+# was set when critique was *argued*. Writing defects now arrive as enumerated offenders
+# with quotes verified against the document, which is the same footing craft repair
+# already works on: exact target in, corrected bullet out, accepted only if it verifies.
+#
+# So they are repaired here rather than competing for worklist slots, which is what left
+# writing_quality the largest remaining loss on the scorecard.
+
+WRITING_SYSTEM = r"""You repair one specific, already-verified defect in each resume bullet you are given. The defect was located by quoting the bullet out of the document, so it is definitely present. Fix exactly that and disturb nothing else.
+
+DEFECT TYPES
+- **dead tail** — the bullet ends on activity, a headcount, a tool list, or an empty purpose clause instead of a result. Rewrite the closing clause so it states what the work produced, found, prevented, saved, or enabled. Use only outcomes the candidate's dump supports; where it records none, close on the hardest technical fact instead. Never invent a number.
+- **weak opening** — replace the opening verb with a strong, specific one. It must not duplicate any verb already used elsewhere in the resume.
+- **off audience** — the bullet is written for a different reader than this role. Reframe it onto the technical substance this job cares about, keeping the same underlying facts.
+- **overbolded** — reduce to at most two \textbf spans: the strongest metric and the strongest job-description keyword. Change no words, only emphasis.
+- **repeated verb** — replace the opening verb with one used nowhere else in the document.
+- **multi claim** — the bullet carries two unrelated claims. Keep the one more relevant to the job description and cut the other, or split if both are strong and the budget allows.
+
+RULES
+- Preserve every fact. You are rewriting how something is said, never what happened.
+- Stay within the stated character maximum: these resumes fit one page by exact measurement, and a longer bullet pushes the page over.
+- Keep the LaTeX markup valid and escape specials in anything you add: \% \& \$ \# \_
+- If a bullet genuinely cannot be improved without inventing something, return it unchanged and say so.
+
+Return every bullet you were given, same indices."""
+
+WRITING_PROMPT = """Repair these {n} bullets. Each carries the defect a judge verified against the document, and its maximum length.
+
+{bullets}
+
+Return one entry per bullet, same indices, with the repaired text and its character count."""
+
+
+def format_writing_defects(defects, max_chars: int = 240) -> str:
+    """Render judge-found writing defects as a worklist with explicit targets."""
+    out = []
+    for d in defects:
+        out.append(
+            f"[{d['index']}] {d['kind']}: {d['fix']}\n"
+            f"currently {d['chars']} characters, maximum {max(max_chars, d['chars'])}:\n{d['text']}"
+        )
+    return "\n\n".join(out)

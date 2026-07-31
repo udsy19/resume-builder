@@ -692,3 +692,64 @@ def score_craft(observations: Dict, latex: str) -> Dict:
         "counts": counts,
         "rejected": rejected,
     }
+
+
+# Field name -> the phrasing the repair prompt understands.
+_DEFECT_KIND = {
+    "dead_tail_bullets": "dead tail",
+    "weak_openings": "weak opening",
+    "off_audience_bullets": "off audience",
+    "overbolded_bullets": "overbolded",
+    "repeated_verbs": "repeated verb",
+    "multi_claim_bullets": "multi claim",
+}
+
+
+def locate_defects(observations: Dict, latex: str) -> List[Dict]:
+    """Map the judge's quoted offenders onto the bullets they came from.
+
+    A quote alone cannot be repaired — the repair pass needs the whole bullet, its index,
+    and its length budget. Anything that cannot be located is dropped rather than guessed
+    at, on the same principle as scoring: an unverifiable defect must not drive an edit.
+
+    One bullet may attract several complaints; they are merged so it is rewritten once
+    with every requirement in view, instead of a later fix undoing an earlier one.
+    """
+    from .latex import parse_bullets
+
+    # parse_bullets identifies a bullet by its position in the list, which is what
+    # replace_bullets keys on, so the position is carried through as the index.
+    rendered = [(i, b, _rendered_text(b["text"]).lower())
+                for i, b in enumerate(parse_bullets(latex))]
+    found: Dict[int, Dict] = {}
+
+    for field, entries in (observations or {}).items():
+        kind = _DEFECT_KIND.get(field)
+        if not kind:
+            continue
+        for e in entries or []:
+            quote = _rendered_text(e.get("quote", "") or "").lower()
+            if len(quote) < _QUOTE_MIN_CHARS:
+                continue
+            head = quote.partition("...")[0].strip() or quote
+            hit = next(((i, b) for i, b, r in rendered if head in r or quote in r), None)
+            if hit is None:
+                continue
+            idx, b = hit
+            rec = found.setdefault(idx, {
+                "index": idx, "text": b["text"], "chars": b["chars"],
+                "kind": [], "fix": [],
+            })
+            if kind not in rec["kind"]:
+                rec["kind"].append(kind)
+            fix = (e.get("fix") or "").strip()
+            if fix and fix not in rec["fix"]:
+                rec["fix"].append(fix)
+
+    out = []
+    for rec in found.values():
+        rec["kind"] = ", ".join(rec["kind"])
+        rec["fix"] = " ".join(rec["fix"]) or "rewrite it to remove the defect"
+        out.append(rec)
+    # Worst first: a bullet with several complaints is the most broken.
+    return sorted(out, key=lambda r: -len(r["kind"].split(",")))

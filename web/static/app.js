@@ -551,7 +551,8 @@ function renderDone(desk, s) {
     <div class="sheet-top">
       <div class="caption">Final plate. Scored by an ATS pass, a recruiter read, and a
         fact-check against your dossier. Chat below to adjust anything.</div>
-      <div class="meta sheet-meta">RESUME BUILDER<br>${r.score == null ? "UNSCORED" : `SCORE ${r.score}/100`} · ${esc(r.verdict.toUpperCase())}</div>
+      <div class="meta sheet-meta">RESUME BUILDER<br>${r.score == null ? "UNSCORED" : `SCORE ${r.score}/100`} · ${esc(r.verdict.toUpperCase())}${
+        r.usage && r.usage.calls ? `<br><span class="usage-line">${esc(usageLine(r.usage))}</span>` : ""}</div>
     </div>
 
     <div class="display-line">${esc(r.jd_analysis.role_title || s.name)}<em>${r.jd_analysis.company ? " @ " + esc(r.jd_analysis.company) : ""}</em></div>
@@ -826,6 +827,31 @@ function wireProviderPicker(s) {
   });
 }
 
+/* Published list prices, USD per million tokens. Shown so a run's cost is a visible
+   number rather than a surprise on a bill; cached input bills at a tenth of input. */
+const PRICES = {
+  "claude-opus-5":  { in: 5.00, out: 25.00 },
+  "claude-sonnet-5": { in: 3.00, out: 15.00 },
+  "gpt-5.6":        { in: 1.25, out: 10.00 },
+};
+
+function runCost(u) {
+  if (!u) return null;
+  const p = PRICES[u.model];
+  if (!p) return null;
+  const fresh = Math.max(0, (u.input || 0) - (u.cached || 0));
+  const usd = (fresh * p.in + (u.cached || 0) * p.in * 0.1 + (u.output || 0) * p.out) / 1e6;
+  return usd;
+}
+
+function usageLine(u) {
+  if (!u || !u.calls) return "";
+  const usd = runCost(u);
+  const tok = ((u.input || 0) + (u.output || 0)) / 1000;
+  return `${u.calls} calls · ${tok.toFixed(0)}k tokens${usd !== null ? ` · ~$${usd.toFixed(2)}` : ""}`
+       + `${u.seconds ? ` · ${Math.round(u.seconds)}s` : ""}`;
+}
+
 function pushLog(s, text, kind = "") {
   s.log.push({ text, kind });
 
@@ -894,6 +920,9 @@ function stopRun(id) {
 }
 
 function handleRunUpdate(s, u) {
+  // Counted for replay: on a rejoin we ask the server for everything past this point.
+  s.eventsSeen = (s.eventsSeen || 0) + 1;
+
   const isActive = s.id === state.activeId && s.status === "running";
 
   if (u.step === "live") {
@@ -963,6 +992,12 @@ function handleRunUpdate(s, u) {
       break;
     case "degraded":
       pushLog(s, u.message, "error");
+      break;
+    case "run_started":
+      // Kept so a reload can rejoin this run instead of losing it.
+      s.runId = u.run_id;
+      s.eventsSeen = 0;
+      save(true);
       break;
     case "reduced_loop":
       // Flagged up front, and kept on the session so the result plate can repeat it —
@@ -1394,6 +1429,46 @@ async function initGate() {
   });
 }
 
+
+/* A run continues on the server whether or not anyone is listening, so a reload
+   rejoins it instead of writing off fifteen minutes of paid work. */
+async function rejoinRun(s) {
+  if (!s.runId) return false;
+  const controller = new AbortController();
+  state.runs.set(s.id, controller);
+  try {
+    const res = await fetch(`/api/runs/${encodeURIComponent(s.runId)}/stream?offset=${s.eventsSeen || 0}`,
+      { headers: accessHeaders(), signal: controller.signal });
+    if (!res.ok) return false;                 // expired or unknown: fall through
+    pushLog(s, "Reconnected to the run already in progress.", "good");
+    s.status = "running";
+    renderAll();
+    await readSSE(res.body, (u) => handleRunUpdate(s, u));
+    if (s.status === "running") {
+      s.status = "error";
+      pushLog(s, "The stream ended unexpectedly — try again.", "error");
+    }
+    return true;
+  } catch {
+    return false;
+  } finally {
+    state.runs.delete(s.id);
+    save(true);
+    renderRail();
+    if (s.id === state.activeId) renderDesk();
+  }
+}
+
+async function resumeInterruptedRuns() {
+  for (const s of state.sessions) {
+    if ((s.status === "running" || s.status === "interrupted") && s.runId) {
+      const ok = await rejoinRun(s);
+      if (!ok && s.status === "running") s.status = "interrupted";
+    }
+  }
+  save(true); renderAll();
+}
+
 /* ══ Boot ══════════════════════════════════════════════════════════ */
 
 async function boot() {
@@ -1407,6 +1482,7 @@ async function boot() {
   loadStars();
   initGate();
   loadProviders();
+  resumeInterruptedRuns();
   if (!state.profile) setTimeout(openProfile, 400);
 }
 

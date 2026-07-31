@@ -13,12 +13,20 @@ WorkingDirectory=/opt/resume-builder
 EnvironmentFile=/etc/resume-builder.env
 # Port is configurable because a host often already runs something on 8000.
 Environment=PORT=8020
+# Deliberately one worker. The concurrency problem was never worker count — it was
+# that every LaTeX compile blocked the event loop, which is now fixed, and the real
+# work is waiting on model APIs, which one async worker interleaves fine. Adding
+# workers would fragment two things that live in process memory: the rate limiter
+# (each worker would enforce its own, multiplying the real limit) and resumable run
+# records (a reconnect could land on a worker that never saw the run). Raise this
+# only alongside shared storage for both.
+Environment=WORKERS=1
 
 # A full run is ~15 minutes of model calls; nothing here should cut that short.
 ExecStart=/opt/resume-builder/.venv/bin/uvicorn web.app:app \
     --host 127.0.0.1 --port ${PORT} \
     --timeout-keep-alive 1200 \
-    --workers 1
+    --workers ${WORKERS}
 
 Restart=always
 RestartSec=5

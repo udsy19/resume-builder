@@ -5,6 +5,7 @@ The agent loop uses this to learn the *true* page count instead of guessing,
 and to catch documents that don't compile at all.
 """
 
+import asyncio
 import os
 import re
 import shutil
@@ -226,10 +227,17 @@ async def compile_online(latex: str, timeout: float = 45.0) -> CompileResult:
 
 
 async def compile_pdf(latex: str) -> CompileResult:
-    """Compile with whatever is available. Never raises."""
+    """Compile with whatever is available. Never raises.
+
+    compile_local shells out to pdflatex synchronously, so awaiting it directly froze
+    the whole event loop for the length of every compile — and a run compiles 15-30
+    times, with the one-page solver doing it in a tight loop. On a single-worker server
+    that stalls every other user's stream, including the keepalives that hold their
+    connections open. Off the loop it goes.
+    """
     if DANGEROUS.search(latex):
         return CompileResult(ok=False, error="Document contains file-access commands that aren't allowed.")
-    local = compile_local(latex)
+    local = await asyncio.to_thread(compile_local, latex)
     if local is not None:
         return local
     # No local pdflatex. The hosted compiler sends the whole document — a real person's

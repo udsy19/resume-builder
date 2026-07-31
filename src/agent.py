@@ -24,11 +24,14 @@ from typing import AsyncGenerator, Dict, List, Optional
 
 from .ingest import Dump
 from . import prompts
-from .latex import (LINE_COST_PT, bullets_to_expand, bullets_with_widows, craft_defects, bullets_to_tighten, compile_pdf, fit_to_one_page,
-                    line_arithmetic, measure_fit, replace_bullets, skeleton_line_budget)
+from .latex import (LINE_COST_PT, bullets_to_expand, bullets_with_widows, craft_defects,
+                    bullets_to_tighten, compile_pdf, date_format_defects, fit_to_one_page,
+                    line_arithmetic, measure_fit, replace_bullets, skeleton_line_budget,
+                    vmock_defects)
 from . import repair
 from .providers import ProviderError, _as_provider_error, make_provider
-from .validator import keyword_in_text, run_checks, score_craft, spacing_crush_reason
+from .validator import (keyword_in_text, locate_defects, run_checks, score_craft,
+                        spacing_crush_reason)
 
 MODEL = "claude-opus-5"
 MAX_TOKENS = 32000
@@ -62,6 +65,10 @@ REFINE_CYCLE_SECONDS = int(os.environ.get("REFINE_CYCLE_SECONDS", "110"))
 # This exists because the SDK's per-request timeout only catches a stalled read: a stream
 # that trickles keeps every read alive, and one run sat in the fan-out for 72 minutes.
 LENS_TIMEOUT_SECONDS = int(os.environ.get("LENS_TIMEOUT_SECONDS", "150"))
+# Stop filling once fewer than this many rendered lines remain free. A resume is
+# meant to use its one page; leftover space is wasted, and it is the second
+# largest scoring loss after writing quality.
+FILL_TARGET_LINES = float(os.environ.get("FILL_TARGET_LINES", "1.0"))
 SCORE_CAPS = {"keyword_match": 30, "ats_compliance": 20, "writing_quality": 20, "truthfulness": 20, "page_fit": 10}
 
 # Reasoning depth per phase — Opus 5 is strong at low/medium; only writing needs high.
@@ -226,6 +233,11 @@ class ResumeAgent:
         # Replaced per-run by run(); this default keeps edit() and any direct phase call
         # (tests, the chat editor) unbudgeted rather than instantly "expired".
         self._clock = _Clock(float("inf"))
+        self._last_craft_obs: Dict = {}
+        self._wrepaired, self._wrepaired_latex = 0, ""
+        # Token usage accumulates across every call in a run so the cost of a
+        # run is reportable instead of invisible.
+        self.usage = {"input": 0, "output": 0, "cached": 0, "calls": 0}
 
     async def _stream_call(self, *, phase: str, system, messages, output_schema: Optional[dict] = None):
         """One streamed model call, provider-agnostic.
@@ -268,7 +280,13 @@ class ResumeAgent:
         text = result["text"]
         if not text.strip():
             raise AgentError("The model returned an empty response. Try again.")
-        yield {"event": "message", "message": _Result(text, result.get("usage"))}
+        u = result.get("usage")
+        if u is not None:
+            self.usage["input"] += getattr(u, "input_tokens", 0) or 0
+            self.usage["output"] += getattr(u, "output_tokens", 0) or 0
+            self.usage["cached"] += getattr(u, "cached_tokens", 0) or 0
+            self.usage["calls"] += 1
+        yield {"event": "message", "message": _Result(text, u)}
 
     # ── Evaluation: three focused judges, concurrently ───────────────
 
@@ -388,6 +406,7 @@ class ResumeAgent:
             # with fewer defects cannot score the same as one with more.
             obs = res.get("craft_observations")
             if obs is not None:
+                self._last_craft_obs = obs
                 craft = score_craft(obs, latex)
                 scores["writing_quality"] = {"score": craft["score"], "evidence": craft["evidence"]}
                 yield {"step": "craft_scored", "lens": name,
@@ -438,7 +457,7 @@ class ResumeAgent:
                 yield {"step": "skipped", "phase": "tighten",
                        "message": "Skipping further tightening — not enough time left in the run budget."}
                 break
-            fit = measure_fit(latex)
+            fit = await asyncio.to_thread(measure_fit, latex)
             if not fit.ok or fit.headroom_pt is None:
                 break
             if fit.pages == 1 and fit.headroom_pt >= 0:
@@ -512,11 +531,15 @@ class ResumeAgent:
                 yield {"step": "skipped", "phase": "expand",
                        "message": "Skipping page fill — not enough time left in the run budget."}
                 break
-            fit = measure_fit(latex)
+            fit = await asyncio.to_thread(measure_fit, latex)
             if not fit.ok or fit.headroom_pt is None or fit.pages != 1:
                 break
             lines_free = fit.headroom_pt / LINE_COST_PT
-            if lines_free < 2:                       # already full enough
+            # Was 2. A page with a line and a half spare ships visibly short, and page_fit
+            # measured 7.2/10 across runs for exactly that reason — the judges see the
+            # whitespace even when the score sheet says one page. One line of slack is the
+            # smallest gap worth leaving, and it is measured rather than argued.
+            if lines_free < FILL_TARGET_LINES:
                 break
             todo = bullets_to_expand(latex, lines_free - 0.5)
             if not todo:
@@ -563,7 +586,7 @@ class ResumeAgent:
             if not accepted:
                 break
             candidate = replace_bullets(latex, accepted)
-            check = measure_fit(candidate)
+            check = await asyncio.to_thread(measure_fit, candidate)
             if not check.ok or check.pages != 1:
                 break                                # never trade a full page for a second one
             latex = candidate
@@ -933,7 +956,20 @@ class ResumeAgent:
                        "message": "Out of time with the page constraint unmet — trimming to one page directly."}
                 break
 
-            worklist = _prioritize(evaluation["issues"], evaluation["scores"])
+            # Writing defects are repaired directly from their verified quotes rather
+            # than competing for the six worklist slots, so the worklist can spend all
+            # six on things only a rewrite can address.
+            if self._last_craft_obs:
+                async for ev in self._repair_writing(latex, dump, self._last_craft_obs):
+                    yield ev
+                if self._wrepaired:
+                    latex = self._wrepaired_latex
+
+            worklist = _prioritize(
+                [i for i in evaluation["issues"] if i.get("category") != "writing_quality"]
+                if self._wrepaired else evaluation["issues"],
+                evaluation["scores"],
+            )
             yield {"step": "refining", "phase": "refine", "iteration": iteration,
                    "message": f"Fixing the {len(worklist)} highest-leverage issue(s) "
                               f"(of {len(evaluation['issues'])} found)...",
@@ -1073,10 +1109,45 @@ class ResumeAgent:
             except (ProviderError, AgentError) as e:
                 yield {"step": "widows_fixed", "message": f"Widow repair skipped ({e})", "data": {"count": 0}}
 
+        # ── Final fill: the refine cycles cut content, and nothing put it back.
+        # Expansion runs once, before the loop. Every refine pass after that trims — a
+        # bullet split, a claim cut, a widow removed — so the shipped page was routinely
+        # emptier than the one that was measured, which is what held page_fit at 7.2/10.
+        # Measure what is actually left and spend it.
+        if not clock.expired(TAIL_RESERVE_SECONDS):
+            final_fit = await asyncio.to_thread(measure_fit, best["latex"])
+            if final_fit.ok and final_fit.pages == 1 and final_fit.headroom_pt is not None:
+                free = final_fit.headroom_pt / LINE_COST_PT
+                if free >= FILL_TARGET_LINES + 0.5:
+                    yield {"step": "filling", "phase": "expand",
+                           "message": f"Page has ~{free:.1f} lines spare after refinement — filling it",
+                           "data": {"lines_free": round(free, 1)}}
+                    async for ev in self._expand(best["latex"], dump, rounds=1):
+                        yield ev
+                    if self._expanded:
+                        verify = await compile_pdf(self._expanded_latex)
+                        if verify.ok and verify.pages == 1:
+                            best["latex"] = self._expanded_latex
+                            yield {"step": "filled",
+                                   "message": f"Filled the page with {self._expanded} expanded bullet(s)",
+                                   "data": {"count": self._expanded}}
+
         # ── Final editorial audit: the craft layer. Content is frozen; this fixes only
         # consistency, typography and widow lines. Accepted only if the result still fits
         # one page and keeps every keyword — otherwise discarded.
-        if clock.expired():
+        audit_worth_it = bool(
+            craft_defects(best["latex"]) or bullets_with_widows(best["latex"])
+            or date_format_defects(best["latex"]) or vmock_defects(best["latex"])
+        )
+        if not audit_worth_it:
+            # The audit costs 70-80s and only ever fixes typography and consistency.
+            # When every mechanical checker reports the document clean there is nothing
+            # for it to find, and the time is better left unspent.
+            yield {"step": "skipped", "phase": "audit",
+                   "message": "Skipping the final audit — no typography or consistency "
+                              "defects were detected.", "progress": 97}
+            audited = None
+        elif clock.expired():
             yield {"step": "skipped", "phase": "audit",
                    "message": f"Skipping the final audit — the {int(clock.budget)}s run budget is spent. "
                               "The draft below is the champion; run again for the editorial pass.",
@@ -1146,9 +1217,76 @@ class ResumeAgent:
                 "coverage_plan": {"supported": plan.get("supported", []), "absent": absent},
                 "aggressiveness": aggressiveness,
                 "iterations": history,
+                "usage": {**self.usage, "provider": self.provider.name,
+                          "model": self.provider.model,
+                          "seconds": round(clock.elapsed(), 1)},
             },
         }
 
+
+
+    async def _repair_writing(self, latex: str, dump, observations: Dict, max_bullets: int = 10):
+        """Repair judge-found writing defects directly, instead of rationing them.
+
+        The refine worklist sends six issues per cycle out of twenty to forty found, so
+        most writing defects were reported and never fixed — which is why writing_quality
+        was the largest remaining loss. These arrive as quotes verified against the
+        document, so they can be targeted the same way craft defects are: exact bullet,
+        exact target, accepted only if the rewrite verifies.
+        """
+        self._wrepaired, self._wrepaired_latex = 0, latex
+        defects = locate_defects(observations, latex)[:max_bullets]
+        if not defects:
+            return
+        if self._clock.expired(TAIL_RESERVE_SECONDS + POLISH_ROUND_SECONDS):
+            yield {"step": "skipped", "phase": "repair",
+                   "message": f"Skipping {len(defects)} writing repair(s) — out of time."}
+            return
+
+        yield {"step": "wrepairing", "phase": "repair",
+               "message": f"Repairing {len(defects)} bullet(s) the judges flagged for writing",
+               "data": {"count": len(defects)}}
+
+        result = None
+        try:
+            async for ev in self._stream_call(
+                phase="repair", system=repair.WRITING_SYSTEM,
+                messages=[{"role": "user", "content": dump.as_content_blocks(
+                    repair.WRITING_PROMPT.format(
+                        n=len(defects), bullets=repair.format_writing_defects(defects)))}],
+                output_schema=repair.CRAFT_SCHEMA,
+            ):
+                if ev["event"] == "message":
+                    result = _parse_json(_text_of(ev["message"]))
+                else:
+                    yield {"step": "live", **ev}
+        except (ProviderError, AgentError) as e:
+            yield {"step": "wrepaired", "message": f"Writing repair skipped ({e})", "data": {"count": 0}}
+            return
+
+        budget = {d["index"]: max(240, d["chars"]) for d in defects}
+        accepted = {
+            b["index"]: b["text"] for b in (result or {}).get("bullets", [])
+            if b["index"] in budget and b["text"].strip() and not b.get("unchanged")
+            and len(b["text"]) <= budget[b["index"]]
+        }
+        if not accepted:
+            yield {"step": "wrepaired", "message": "No writing repairs were usable", "data": {"count": 0}}
+            return
+
+        candidate = replace_bullets(latex, accepted)
+        # A repair that breaks the build or spills the page is worse than the defect.
+        verify = await compile_pdf(candidate)
+        if not verify.ok or verify.pages != 1:
+            yield {"step": "wrepaired",
+                   "message": "Writing repairs rejected — they broke the one-page fit",
+                   "data": {"count": 0}}
+            return
+
+        self._wrepaired, self._wrepaired_latex = len(accepted), candidate
+        yield {"step": "wrepaired",
+               "message": f"Repaired {len(accepted)} bullet(s) for writing quality",
+               "data": {"count": len(accepted)}}
 
     # ── Cover letter ─────────────────────────────────────────────────
 

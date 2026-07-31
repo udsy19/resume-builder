@@ -932,3 +932,6 @@ details.advanced[open] summary { margin-bottom: 14px; }
   .prov-row { flex-wrap: wrap; }
   .prov-more { margin-left: 0; }
 }
+
+/* What the run cost — a visible number, not a surprise on a bill. */
+.usage-line { opacity: 0.55; text-transform: none; letter-spacing: 0.02em; }
