@@ -2,7 +2,9 @@
 
 **ATS-perfect resumes, recursively evaluated.** One input — a dump of everything about you — plus a job description in; a tailored, truthful, exactly-one-page LaTeX resume out.
 
-This is not a template filler. It is an agentic loop built directly on the Anthropic SDK that writes a resume, judges it against a recruiter-grade rubric, and keeps refining until it scores **95+/100** or the time budget runs out. Page fit is *measured* by actually compiling the LaTeX, never guessed.
+This is not a template filler. It is an agentic loop that writes a resume, judges it against a recruiter-grade rubric, and keeps refining until the score stops improving or the time budget runs out. Page fit is *measured* by actually compiling the LaTeX, never guessed.
+
+**What it actually scores.** On live runs the finished resume lands in the **77-89/100** band, always on exactly one page, with 100% of the job description's must-have keywords that the candidate can honestly support — when given a full time budget. The 95 threshold is the loop's stopping condition, not a claim about typical output; see [`tests/results/BENCHMARK.md`](tests/results/BENCHMARK.md) for every measured run, including the ones that went backwards.
 
 ## How it works
 
@@ -157,13 +159,17 @@ uvicorn web.app:app --reload
 | `OPENAI_API_KEY` | — | OpenAI provider key |
 | `RESUME_PROVIDER` | auto-detect | Force `anthropic` or `openai` |
 | `RESUME_MODEL` | provider default | Override the model id |
-| `RUN_BUDGET_SECONDS` | `250` | Wall-clock budget per run (raise for long local runs) |
+| `RUN_BUDGET_SECONDS` | `900` | Wall-clock budget per run. This is what a *complete* run costs. Lower it and the loop stops early — measured, keyword coverage drops from 100% to 82% when the budget allows two refine cycles instead of four. Shorter does not mean faster, it means worse. |
+| `PROVIDER_TIMEOUT_SECONDS` | `180` | Per-request timeout for the model provider |
+| `PROVIDER_MAX_RETRIES` | `3` | SDK-level retries on connection failures |
 | `TAIL_RESERVE_SECONDS` | `80` | Time reserved for the closing fit/repair/audit phases |
 | `PDFLATEX` | auto-detect | Explicit path to a `pdflatex` binary |
 
 ### Deploy to Vercel
 
-The repo deploys as-is: [`vercel.json`](vercel.json) rewrites everything to the serverless function [`api/index.py`](api/index.py), bundles `templates/`, `web/`, and `src/`, and sets a 300 s function timeout (the run budget's soft deadline exists precisely so a run ships its best draft before that timeout). Set the API key env vars in the Vercel project settings, or let users bring their own key in the UI.
+The repo deploys as-is: [`vercel.json`](vercel.json) rewrites everything to the serverless function [`api/index.py`](api/index.py), bundles `templates/`, `web/`, and `src/`, sets a 300 s function timeout, and pins `RUN_BUDGET_SECONDS` to 250 so a run ships its best draft before that timeout. Set the API key env vars in the Vercel project settings, or let users bring their own key in the UI.
+
+**Be aware of what that costs.** 300 s fits roughly one evaluation pass and no refinement, and refinement is what lands the last keywords. The app says so explicitly in the UI when the budget cannot fit a full loop, rather than presenting a truncated run as a finished one. To get the full loop, run it somewhere without a per-request ceiling — a background worker, a queue, or any host that allows ~15-minute requests.
 
 ## Testing
 

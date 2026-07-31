@@ -291,3 +291,46 @@ The default budget is a product decision, not a tuning knob: see below.
 
 Vercel's serverless ceiling is 300s, which fits *one* pass. Shipping the full loop needs
 a background worker or a streaming job that survives past a single request.
+
+## v6b / v6c — OpenAI parity, and three failures found by running it
+
+Running the loop against OpenAI rather than reading the code found three defects that
+the Anthropic path had never exposed. All three are fixed; each one had killed a run.
+
+| run | outcome |
+|---|---|
+| v6b (first attempt) | died on `httpx.ReadTimeout` while tightening — transport errors are not `ProviderError`, so they escaped every degradation path |
+| v6b (second attempt) | died when one judge lens failed on the first pass, discarding a finished one-page resume and reporting only `Evaluation lens failed: ats` with the cause thrown away |
+| v6c | **completed**: 69/100, exactly one page, **100% must-have coverage** |
+
+### The computed craft lens works on both providers
+
+OpenAI accepts the `craft_observations` schema under strict mode, and the score moves:
+
+| provider | observed writing_quality |
+|---|---|
+| claude-opus-5 | 10 → 12 |
+| gpt-5.6 | 14 → 12 |
+
+Four distinct values across two providers. The old lens returned 15 in nine of fourteen
+runs and never left 14-17.
+
+### OpenAI is NOT at parity on truthfulness
+
+`SCORES {"keyword_match": 28, "ats_compliance": 16, "page_fit": 7, "writing_quality": 14,
+"truthfulness": 4}`
+
+**truthfulness 4/20.** The fact-checker found claims the dump does not support — at
+aggressiveness 3, gpt-5.6 invented material rather than reframing what was there. The
+comparable Claude run scored 17/20 on the same fixture and the same aggressiveness.
+Keyword coverage and page fit are at parity; truthfulness is not, and truthfulness is the
+one category where a failure makes the resume actively harmful to send.
+
+**Do not ship OpenAI at aggressiveness 3 without addressing this.** Either constrain the
+OpenAI writer prompt further, or cap OpenAI runs at aggressiveness 2 until a run scores
+truthfulness in the high teens.
+
+Secondary: OpenAI tightening cost ~73s per round against ~14s on Claude, so polish
+consumed enough budget to leave the page constraint unmet at the deadline ("Out of time
+with the page constraint unmet — trimming to one page directly"). The deterministic fit
+solver caught it and the resume still shipped on one page.

@@ -297,22 +297,37 @@ class ResumeAgent:
                     })
                 content.append({"type": "text", "text": prompt})
 
-            result = None
-            try:
-                async for ev in self._stream_call(
-                    phase="evaluate",
-                    system=prompts.EVALUATOR_SYSTEM,
-                    messages=[{"role": "user", "content": content}],
-                    output_schema=prompts.judge_schema(lens["categories"]),
-                ):
-                    if ev["event"] == "message":
-                        result = _parse_json(_text_of(ev["message"]))
-                    else:
-                        await queue.put({"step": "live", **ev, "lens": name})
-            except Exception as e:                      # one lens failing must not hang the rest
-                await queue.put({"__done__": name, "result": None, "error": repr(e)})
-                return
-            await queue.put({"__done__": name, "result": result})
+            # One transient failure used to cost the entire run: a lens that errored took
+            # the whole evaluation with it, and on the first pass there was no earlier
+            # draft to fall back to, so a finished one-page resume was thrown away. Each
+            # lens gets one retry before it is called lost.
+            last_error = None
+            for attempt in (1, 2):
+                result = None
+                try:
+                    async for ev in self._stream_call(
+                        phase="evaluate",
+                        system=prompts.EVALUATOR_SYSTEM,
+                        messages=[{"role": "user", "content": content}],
+                        output_schema=prompts.judge_schema(lens["categories"]),
+                    ):
+                        if ev["event"] == "message":
+                            result = _parse_json(_text_of(ev["message"]))
+                        else:
+                            await queue.put({"step": "live", **ev, "lens": name})
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:                  # one lens failing must not hang the rest
+                    last_error = e
+                    result = None
+                if result is not None:
+                    await queue.put({"__done__": name, "result": result})
+                    return
+                if attempt == 1:
+                    await queue.put({"step": "retry", "lens": name,
+                                     "message": f"{name} judge failed ({last_error}) — retrying once."})
+            await queue.put({"__done__": name, "result": None,
+                             "error": str(last_error) if last_error else "returned no result"})
 
         queue: asyncio.Queue = asyncio.Queue()
         tasks = [asyncio.create_task(one(n, l, queue)) for n, l in prompts.JUDGE_LENSES.items()]
@@ -337,7 +352,10 @@ class ResumeAgent:
                     t.cancel()
 
         if errors:
-            raise AgentError(f"Evaluation lens failed: {', '.join(errors)}")
+            # Name the reason, not just the lens. "Evaluation lens failed: ats" cost real
+            # debugging time because the actual cause was thrown away here.
+            detail = "; ".join(f"{n}: {why}" for n, why in errors.items())
+            raise AgentError(f"Evaluation lens failed — {detail}")
 
         scores: Dict[str, Dict] = {}
         issues: List[Dict] = []
@@ -773,6 +791,25 @@ class ResumeAgent:
                     yield {"step": "degraded",
                            "message": f"Evaluation pass {iteration} failed ({e}); shipping the best draft so far."}
                     break
+                # Nothing scored yet. The draft is still written, tightened and compiled to
+                # one page, so shipping it unscored beats raising and handing back nothing —
+                # which is what an evaluation failure on the first pass used to do.
+                if checks.compile_ok is not False:
+                    yield {"step": "degraded",
+                           "message": f"Scoring failed ({e}). The resume itself is finished and fits "
+                                      "one page, so it is below — it just has no score attached. "
+                                      "Re-run to have it evaluated."}
+                    evaluation = {
+                        "total": None,
+                        "verdict": "unscored",
+                        "scores": {cat: {"score": 0, "evidence": "Not scored — evaluation failed."}
+                                   for cat in SCORE_CAPS},
+                        "issues": [],
+                        "local_checks": checks.to_dict(),
+                    }
+                    best = {"latex": latex, "evaluation": evaluation,
+                            "total": None, "hard_ok": checks.pages == 1}
+                    break
                 raise
 
             evaluation["local_checks"] = checks.to_dict()
@@ -1027,7 +1064,9 @@ class ResumeAgent:
 
         yield {
             "step": "result",
-            "message": f"Done — final score {best['total']}/100 after {len(history)} evaluation pass(es)",
+            "message": (f"Done — final score {best['total']}/100 after {len(history)} evaluation pass(es)"
+                        if best["total"] is not None else
+                        "Done — resume finished, but scoring failed so it is unscored"),
             "progress": 100,
             "result": {
                 "latex": best["latex"],

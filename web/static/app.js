@@ -533,7 +533,7 @@ function renderDone(desk, s) {
     <div class="sheet-top">
       <div class="caption">Final plate. Scored by an ATS pass, a recruiter read, and a
         fact-check against your dossier. Chat below to adjust anything.</div>
-      <div class="meta sheet-meta">RESUME BUILDER<br>SCORE ${r.score}/100 · ${esc(r.verdict.toUpperCase())}</div>
+      <div class="meta sheet-meta">RESUME BUILDER<br>${r.score == null ? "UNSCORED" : `SCORE ${r.score}/100`} · ${esc(r.verdict.toUpperCase())}</div>
     </div>
 
     <div class="display-line">${esc(r.jd_analysis.role_title || s.name)}<em>${r.jd_analysis.company ? " @ " + esc(r.jd_analysis.company) : ""}</em></div>
@@ -542,7 +542,7 @@ function renderDone(desk, s) {
 
     <div class="result-grid">
       <div class="score-block">
-        <div class="score-num ${r.score >= 88 ? "good" : r.score >= 70 ? "ok" : "bad"}">${r.score}<small>/100</small></div>
+        <div class="score-num ${r.score == null ? "" : r.score >= 88 ? "good" : r.score >= 70 ? "ok" : "bad"}">${r.score == null ? "—" : r.score}<small>${r.score == null ? "" : "/100"}</small></div>
         <div class="score-bars">
           ${Object.entries(CAPS).map(([cat, cap]) => `
             <div class="score-bar-row" title="${esc(r.scores[cat].evidence)}">

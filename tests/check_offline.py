@@ -235,6 +235,21 @@ def main():
         assert "_as_provider_error" in call, "_stream_call does not normalise transport errors"
     check("transport failures degrade instead of aborting the run", transport_errors_degrade)
 
+    def evaluation_failure_still_ships():
+        """A failed first evaluation must still hand back the finished resume."""
+        src = (ROOT / "src" / "agent.py").read_text()
+        loop = src.split("Never throw away a good draft")[1].split("evaluation[\"local_checks\"]")[0]
+        assert "unscored" in loop, "first-pass evaluation failure does not ship the draft"
+        assert loop.count("raise") == 1, "should only re-raise when the draft does not compile"
+        # Each judge lens retries once before being called lost.
+        judge = src.split("async def _judge(")[1].split("\n    async def ")[0]
+        assert "for attempt in (1, 2)" in judge, "judge lens has no retry"
+        assert "Evaluation lens failed \u2014" in judge, "lens failure discards the reason"
+        # A null score must not render as "null/100".
+        app = (ROOT / "web" / "static" / "app.js").read_text()
+        assert 'r.score == null ? "UNSCORED"' in app, "UI does not handle an unscored result"
+    check("a failed evaluation still returns the resume", evaluation_failure_still_ships)
+
     print()
     if failures:
         print(f"{len(failures)} FAILURE(S): {', '.join(failures)}")
