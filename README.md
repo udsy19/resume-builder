@@ -1,118 +1,208 @@
+<div align="center">
+
 # Resume Builder
 
-**ATS-perfect resumes, recursively evaluated.** One input — a dump of everything about you — plus a job description in; a tailored, truthful, exactly-one-page LaTeX resume out.
+**ATS-optimized, one-page LaTeX resumes — written, judged, and rewritten by an agent loop.**
 
-This is not a template filler. It is an agentic loop that writes a resume, judges it against a recruiter-grade rubric, and keeps refining until the score stops improving or the time budget runs out. Page fit is *measured* by actually compiling the LaTeX, never guessed.
+One dump of everything about you, plus a job description. Out comes a tailored, truthful resume that fits on exactly one page — because the page fit is *measured* by compiling the PDF, never guessed.
 
-**What it actually scores.** On live runs the finished resume lands in the **77-89/100** band, always on exactly one page, with 100% of the job description's must-have keywords that the candidate can honestly support — when given a full time budget. The 95 threshold is the loop's stopping condition, not a claim about typical output; see [`tests/results/BENCHMARK.md`](tests/results/BENCHMARK.md) for every measured run, including the ones that went backwards.
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
+[![Providers](https://img.shields.io/badge/providers-Anthropic%20%7C%20OpenAI-8A3FFC.svg)](#model-providers)
+[![Deploy: Vercel](https://img.shields.io/badge/deploy-Vercel-black.svg)](#deployment)
+
+[Quickstart](#quickstart) · [How it works](#how-it-works) · [Configuration](#configuration) · [API](#api) · [Contributing](#contributing)
+
+</div>
+
+---
+
+## What this is
+
+This is not a template filler. It is an agent loop that writes a resume, judges it against a recruiter-grade rubric, and keeps refining until the score stops improving or the time budget runs out.
+
+Three things make it different from asking a chatbot for a resume:
+
+- **One page is a guarantee, not a hope.** The LaTeX is compiled and TeX's own page arithmetic is read back. If the draft overflows, bullets are shortened by exact character targets until it fits.
+- **Facts come only from your dump.** A dedicated fact-checking judge audits every draft against what you actually wrote. The writer may reframe and re-language; it may not invent.
+- **Repairs act on measured defects.** Across live runs, critique backed by a deterministic check reliably improved the draft while model-judged opinion was roughly a coin flip. So the repair passes only fix things a checker found.
+
+### What it actually scores
+
+> Finished resumes land in the **77-89 / 100** band, on exactly one page, with **100%** of the must-have keywords your background can honestly support — given a full time budget.
+
+The 95 threshold in the code is the loop's *stopping condition*, not a claim about typical output. [`tests/results/BENCHMARK.md`](tests/results/BENCHMARK.md) records every measured run, including the ones that regressed and the bugs they exposed.
+
+---
+
+## Quickstart
+
+**Prerequisites:** Python 3.11+, a TeX distribution with `pdflatex` on your `PATH` ([MacTeX](https://tug.org/mactex/), [TeX Live](https://tug.org/texlive/), or MiKTeX), and an API key from Anthropic or OpenAI.
+
+```bash
+git clone https://github.com/udsy19/resume-builder.git
+cd resume-builder
+pip install -r requirements.txt
+
+echo "ANTHROPIC_API_KEY=sk-ant-..." > .env      # or OPENAI_API_KEY=sk-proj-...
+
+python3 -m uvicorn web.app:app --reload
+# open http://127.0.0.1:8000
+```
+
+Verify your toolchain before the first run — this compiles every template and checks the agent's wiring, with no API calls and no cost:
+
+```bash
+python3 tests/check_offline.py
+```
+
+> [!IMPORTANT]
+> A complete run takes **~15 minutes** and the default budget reflects that. See [Time budget](#time-budget) before you shorten it — a smaller budget does not produce a faster resume, it produces a worse one.
+
+---
 
 ## How it works
 
-Each run is a generate → evaluate → refine loop with deterministic polish phases:
+Each run is a generate → evaluate → refine loop wrapped in deterministic polish phases.
 
 ```
- dump + JD + template + aggressiveness
+ dump + job description + template + aggressiveness
         │
         ▼
- 1. Analyze the JD ──── role framing + ATS keyword plan (structured output)
-        │
+ 1. Analyze the JD ──── role framing and an ATS keyword plan, extracted as
+        │               atomic placeable terms rather than narrative phrases
         ▼
- 2. Feasibility plan ── which requirements the dump can honestly support,
-        │               and which are genuinely outside the background
+ 2. Feasibility plan ── which requirements your dump can honestly support,
+        │               and which are genuinely outside your background.
+        │               Scoring only counts the supported ones.
         ▼
  3. Generate ────────── tailored LaTeX written into the chosen template,
-        │               against a measured line budget for the page
+        │               against a line budget measured from the skeleton
         ▼
- 4. Evaluate ────────── fast local checks (validator.py) feed ground-truth
-        │               counts into three parallel LLM judges — recruiter,
-        │               ATS, and fact-checker lenses
+ 4. Polish ──────────── deterministic passes: tighten overlong bullets to
+        │               exact targets, repair measured craft defects, then
+        │               expand to fill the page and land missing keywords
         ▼
- 5. Refine ──────────── if the verdict says revise, the critique goes back
-        │               to the writer; repeat until pass, score plateau,
-        │               or the wall-clock budget is spent
+ 5. Evaluate ────────── local checks feed ground-truth counts into three
+        │               parallel judges — ATS, recruiter craft, fact-checker
         ▼
- 6. Polish ──────────── deterministic repair passes: tighten overlong
-        │               bullets, expand missing keywords, fix measured
-        │               craft defects, kill widowed lines
+ 6. Refine ──────────── the worklist goes back to the writer as a restated
+        │               spec, not a growing chat history. Repeat until pass,
+        │               plateau, or the wall-clock budget is spent.
         ▼
- 7. One-page fit ────── compile the PDF, measure the real page count and
-        │               fill, and add/cut lines by exact arithmetic until
-        │               the page is ~95% full — exactly one page
+ 7. One-page fit ────── compile, measure, and cut the lowest-value content
+        │               by exact arithmetic until the page is one page
         ▼
- 8. Final audit ─────── ship the champion draft (best-scoring, always kept)
+ 8. Final audit ─────── typography and consistency, then ship the champion
+                        draft — the best-scoring one, always kept
 ```
 
-Key design decisions, each backed by measurement (see [`research/`](research/)):
+### Design decisions, each backed by measurement
 
-- **The unit of fit is rendered lines.** The writer is given a line budget computed from the template skeleton, and the fit solver does line arithmetic against the compiled PDF rather than eyeballing whitespace.
-- **Only measured defects get repaired.** Across live runs, critique items backed by a deterministic check reliably improved the draft; model-judged opinions were a coin flip. So the repair phases (`src/repair.py`) act only on mechanically detected defects — a missing metric, emphasis spam, a widowed line — and accept a rewrite only if it verifiably fixes the target.
-- **Judge noise is accounted for.** Re-scoring the same resume k=5 times showed a ±3-point spread, so the loop treats score differences inside that band as noise instead of chasing them.
-- **The champion draft always ships.** Every run keeps its best-scoring draft; a refinement that regresses, times out, or fails to compile never loses work.
-- **Everything streams.** Every model call forwards summarized thinking and writing progress over SSE, so the UI is never a dead loading screen.
-- **A wall-clock budget governs the run.** The loop reserves time for the mandatory closing phases (fit solver, widow repair, audit) and only starts a refine cycle it can finish — sized for serverless timeouts, overridable for long local runs.
+Full write-ups in [`research/`](research/).
+
+| Decision | Why |
+|---|---|
+| **The unit of fit is rendered lines** | A probe injected at the `pdflatex` command line reports TeX's page arithmetic (`textheight + pageshrink − pagetotal`). It is linear and unsaturated, where PDF ink coverage pins at ~99% whether the page has four bullets of slack or none. |
+| **Only measured defects get repaired** | Deterministic-backed critique reliably improved drafts; model-argued critique did not. Repairs name the exact bullet and target, and are accepted only if they verifiably hit it. |
+| **Writing quality is computed, not scored** | Asked for a number, the judge returned 15/20 in nine of fourteen runs regardless of the draft — its own rubric bands funnelled every real resume into one range. It now *enumerates* defects with verbatim quotes, and the score is arithmetic over the ones that can be found in the document. |
+| **Judge noise is measured** | Re-scoring an identical resume five times gave a ±3-point spread, so differences inside that band are treated as noise instead of chased. |
+| **The champion always ships** | A refinement that regresses, times out, or fails to compile never costs you work. A one-page draft beats a higher-scoring two-page one, because two pages is not a resume. |
+| **A wall-clock budget governs every phase** | Optional polish is skipped when time is short so evaluation still runs, and a refine cycle is only started if it can finish. Skips are announced — a truncated run never reads as a finished one. |
+| **Everything streams** | Every model call forwards summarized reasoning over SSE, so the UI is never a dead loading screen. |
+
+---
 
 ## Truthfulness
 
-The candidate dump is the **sole source of facts**. The writer may select, condense, reorder, reframe, and align terminology with the JD — it may never invent employers, roles, dates, degrees, certifications, tools, or numbers, extend a date range, upgrade a title, or move a real metric onto work it didn't come from. A dedicated fact-checker judge audits every draft against the dump, and the JD/dump are explicitly treated as *data, not instructions* (prompt-injection text inside either is ignored).
+Your dump is the **sole source of facts.**
+
+The writer may select, condense, reorder, reframe, and align terminology with the job description. It may **not** invent employers, roles, dates, degrees, certifications, tools, or numbers; extend a date range; upgrade a title; or move a real metric onto work it didn't come from.
+
+A dedicated fact-checker judge audits every draft against the dump. Both the job description and the dump are treated as **data, not instructions** — prompt-injection text inside either is ignored.
+
+---
 
 ## Aggressiveness levels
 
 | Level | Name | What it does |
-|---|---|---|
+|:---:|---|---|
 | 1 | **Polish** | Your resume, professionally edited. Rephrasing, keyword weaving, metric surfacing — no reordering, dropping, or retitling. |
-| 2 | **Tailor** | Every fact stays, but the page is re-weighted for this JD: most relevant work leads and gets the most bullets, skills are rebuilt around the JD's taxonomy, off-target bullets are reframed around their technical substance. |
-| 3 | **Transform** | Works backwards from the ideal candidate: designs the perfect one-page resume for the role from the JD alone, then fills each slot with the strongest *true* evidence from the dump. Slots the dump can't support stay empty — the transformation lives in selection, framing, and language, never in the facts. |
+| 2 | **Tailor** | Every fact stays, but the page is re-weighted for this role: the most relevant work leads and gets the most bullets, skills are rebuilt around the JD's taxonomy, off-target bullets are reframed around their technical substance. |
+| 3 | **Transform** | Works backwards from the ideal candidate — designs the perfect one-page resume for the role from the JD alone, then fills each slot with the strongest *true* evidence from your dump. Slots your dump can't support stay empty. The transformation is in selection, framing, and language; never in the facts. |
+
+---
 
 ## Templates
 
-Four built-in LaTeX templates in [`templates/`](templates/), with compiled PDF previews served by the API:
+Four built-in LaTeX templates in [`templates/`](templates/), each with a compiled PDF preview served by the API.
 
 | ID | Name | Best for |
 |---|---|---|
-| `udaya` | Udaya's Template *(default)* | Dense single-page layout with bold dates/locations, linked certifications, categorized skills rows |
+| `udaya` | Udaya's Template *(default)* | Dense single-page layout — bold dates and locations, linked certifications, categorized skills rows |
 | `jakes` | Jake's Resume | The classic Jake Gutierrez single-column layout |
-| `mst` | Big Tech New Grad | Students/new grads — coursework grid, Activities & Honors |
-| `sb2nov` | Software Engineer | Sourabh Bajaj's template — titled bullet items for experienced engineers |
+| `mst` | Big Tech New Grad | Students and new grads — coursework grid, Activities & Honors |
+| `sb2nov` | Software Engineer | Sourabh Bajaj's template — titled bullet items, for experienced engineers |
 
-You can also upload a **custom LaTeX template**; it is validated and sandboxed (dangerous LaTeX primitives are rejected) and rides in the user turn so it never carries system-prompt authority.
+You can also upload a **custom LaTeX template.** It is validated and sandboxed (dangerous LaTeX primitives are rejected) and rides in the user turn so it never carries system-prompt authority.
 
-## Input formats
+**Input formats:** the dump can be pasted text or an uploaded file — LaTeX, Markdown, plain text, Word (`.docx`), or PDF. Text formats are decoded locally; PDFs are passed to the model natively as document blocks, with no lossy local extraction.
 
-The dump can be pasted text or an uploaded file: **LaTeX, Markdown, plain text, Word (.docx), or PDF**. Text-like formats are decoded locally; PDFs are passed to Claude natively as document blocks — no lossy local extraction.
+---
 
 ## Model providers
 
-`src/providers.py` normalizes Anthropic and OpenAI behind one streaming interface (PDF inputs, JSON-schema outputs, reasoning-effort control), so the whole agent is provider-agnostic.
+[`src/providers.py`](src/providers.py) normalizes Anthropic and OpenAI behind one streaming interface — PDF inputs, JSON-schema outputs, reasoning-effort control — so the agent itself is provider-agnostic.
 
-- **Anthropic** (default): Claude Opus 5, with per-phase reasoning effort tuning.
-- **OpenAI**: GPT-5.x, with effort names mapped and clamped for older models.
+| Provider | Default model | Status |
+|---|---|---|
+| **Anthropic** *(default)* | `claude-opus-5` | Fully validated end to end |
+| **OpenAI** | `gpt-5.6` | Runs end to end; **see the caveat below** |
 
-Provider selection: `RESUME_PROVIDER` env var, or auto-detected from whichever API key is present (`sk-ant-…` → Anthropic, `sk-proj-…` → OpenAI). Override the model with `RESUME_MODEL`. Users can also bring their own API key per request from the web UI's settings.
+> [!WARNING]
+> **OpenAI is not at parity on truthfulness.** In the most recent measured run, `gpt-5.6` at aggressiveness 3 scored **truthfulness 4/20** against **17/20** for the comparable Claude run on the same fixture — the fact-checker found claims the dump did not support. Keyword coverage and page fit reach parity; truthfulness does not, and it is the one category where a bad score makes a resume actively harmful to send. **Cap OpenAI at aggressiveness 2** until a run scores truthfulness in the high teens. Details in [`tests/results/BENCHMARK.md`](tests/results/BENCHMARK.md).
 
-## Repository layout
+Provider selection uses `RESUME_PROVIDER`, or is auto-detected from whichever key is present (`sk-ant-…` → Anthropic, `sk-proj-…` → OpenAI). Override the model with `RESUME_MODEL`. Users can also bring their own key per request from the web UI's settings — it is kept in their browser's local storage and never persisted server-side.
 
-```
-src/
-  agent.py       The agent: run loop, three-judge evaluation, refine/polish
-                 phases, wall-clock budgeting, and the chat editor
-  prompts.py     Writer system prompt, aggressiveness levels, judge rubrics
-  providers.py   Anthropic + OpenAI behind one streaming interface
-  validator.py   Fast local checks (no API): keywords, banned verbs, craft
-                 scoring, spacing-crush detection — ground truth for judges
-  repair.py      Deterministic defect repair prompts/schemas
-  latex.py       Compilation (local pdflatex or hosted fallback), page-fit
-                 measurement, line arithmetic, bullet surgery
-  templates.py   Template registry + custom template validation
-  ingest.py      Dump ingestion for .tex/.md/.txt/.docx/.pdf
-  fitprobe.tex   Probe document for calibrating line-height arithmetic
-web/
-  app.py         FastAPI app: SSE endpoints, rate limiting, input caps
-  static/        Single-page frontend (vanilla JS, SSE client, chat editor)
-api/index.py     Vercel serverless entry point
-templates/       Built-in LaTeX templates
-tests/           Offline checks + live end-to-end runs and benchmarks
-research/        Design notes: one-page fit math, loop convergence findings
-```
+---
+
+## Configuration
+
+| Variable | Default | Purpose |
+|---|:---:|---|
+| `ANTHROPIC_API_KEY` | — | Anthropic key (or let users bring their own in the UI) |
+| `OPENAI_API_KEY` | — | OpenAI key |
+| `RESUME_PROVIDER` | auto | `anthropic` or `openai` |
+| `RESUME_MODEL` | provider default | Override the model id |
+| `RUN_BUDGET_SECONDS` | `900` | Wall-clock budget per run — see below |
+| `TAIL_RESERVE_SECONDS` | `80` | Reserved for the closing phases so they are actually paid for |
+| `PROVIDER_TIMEOUT_SECONDS` | `180` | Per-request timeout for the model provider |
+| `PROVIDER_MAX_RETRIES` | `3` | SDK-level retries on connection failures |
+
+### Time budget
+
+`RUN_BUDGET_SECONDS` defaults to **900** because that is what a *complete* run costs. Lowering it makes the loop stop early, and the refine cycles are what land the last keywords:
+
+| Budget | Refine cycles | Measured keyword coverage |
+|---|:---:|---|
+| ~900 s | 4 | **100%** |
+| 600 s | 2 | 82% |
+| 250 s | 0 | one evaluation, no refinement |
+
+**Shorter does not mean faster. It means worse.** When the budget cannot fit a full loop, the run says so up front and the result page repeats it, rather than letting a truncated run read as a resume that merely scored badly.
+
+---
+
+## Deployment
+
+The repo deploys to Vercel as-is: [`vercel.json`](vercel.json) rewrites everything to the serverless function [`api/index.py`](api/index.py), bundles `templates/`, `web/`, and `src/`, sets a 300 s function timeout, and pins `RUN_BUDGET_SECONDS` to 250 so a run ships its best draft before that timeout.
+
+> [!NOTE]
+> **300 s fits roughly one evaluation pass and no refinement.** To get the full loop, run it somewhere without a per-request ceiling — a background worker, a job queue, or any host that allows ~15-minute requests. The app is explicit in the UI when it is running a reduced loop.
+
+Set your API key in the Vercel project's environment variables, or let users supply their own in the UI.
+
+---
 
 ## API
 
@@ -122,71 +212,80 @@ research/        Design notes: one-page fit math, loop convergence findings
 | `GET` | `/api/health` | Health check |
 | `GET` | `/api/templates` | List built-in templates |
 | `GET` | `/api/templates/{id}/preview.pdf` | Compiled template preview |
-| `POST` | `/api/tailor/stream` | Run the full agent loop (SSE progress stream) |
-| `POST` | `/api/edit/stream` | Conversational resume edits via the chat editor (SSE) |
+| `POST` | `/api/tailor/stream` | Run the full agent loop (SSE) |
+| `POST` | `/api/edit/stream` | Conversational resume edits (SSE) |
 | `POST` | `/api/export/pdf` | Compile final LaTeX to PDF |
 | `POST` | `/api/export/tex` | Download the LaTeX source |
 
-`POST /api/tailor/stream` takes multipart form data: `job_description` (required), `dump_text` or a `dump` file, `aggressiveness` (1–3), `template_id` or a `custom_template` file, and an optional `api_key`. The response is a Server-Sent Events stream of progress steps (`analyzing`, `planned`, `generating`, `evaluated`, `refining`, `fitted`, `audited`, …) ending with a `result` event containing the final LaTeX, scores, and stats.
+`POST /api/tailor/stream` takes multipart form data: `job_description` (required), `dump_text` or a `dump` file, `aggressiveness` (1–3), `template_id` or a `custom_template` file, and an optional `api_key`. It responds with a Server-Sent Events stream of progress steps — `analyzing`, `planned`, `generating`, `evaluated`, `refining`, `fitted`, `audited` — ending with a `result` event carrying the final LaTeX, scores, and stats.
 
-The app enforces input caps (4 MB dump, 50 K-char JD) and per-IP rate limits, and scrubs submitted values (which can contain API keys) from validation errors.
+The app enforces input caps (4 MB dump, 50 K-character JD) and per-IP rate limits, and scrubs submitted values from validation errors, since those values can contain API keys.
 
-## Getting started
+---
 
-### Prerequisites
+## Repository layout
 
-- Python 3.11+
-- An Anthropic API key (or OpenAI key)
-- Optional but recommended: a local TeX installation (`pdflatex`). Without one, compilation falls back to a hosted LaTeX compiler — slower, and your resume transits a third-party service. Common TeX install paths are auto-detected even when not on `PATH`; you can also point at a binary with `PDFLATEX=/path/to/pdflatex`.
-
-### Run locally
-
-```bash
-pip install -r requirements.txt
-
-# .env: ANTHROPIC_API_KEY=sk-ant-...   (or OPENAI_API_KEY)
-set -a && . ./.env && set +a
-
-uvicorn web.app:app --reload
-# open http://127.0.0.1:8000
+```
+src/
+  agent.py       Run loop, three-judge evaluation, refine and polish phases,
+                 wall-clock budgeting, and the chat editor
+  prompts.py     Writer system prompt, aggressiveness levels, judge rubrics
+  providers.py   Anthropic + OpenAI behind one streaming interface
+  validator.py   Fast local checks (no API): keyword coverage, layout defects,
+                 craft scoring, spacing-crush detection — ground truth for judges
+  repair.py      Deterministic defect repair prompts and schemas
+  latex.py       Compilation, page-fit measurement, line arithmetic, bullet surgery
+  templates.py   Template registry and custom-template validation
+  ingest.py      Dump ingestion for .tex / .md / .txt / .docx / .pdf
+  fitprobe.tex   Non-invasive probe for TeX's page arithmetic
+web/
+  app.py         FastAPI app: SSE endpoints, rate limiting, input caps
+  static/        Single-page frontend — vanilla JS, SSE client, chat editor
+api/index.py     Vercel serverless entry point
+templates/       Built-in LaTeX templates
+tests/           Offline checks, live end-to-end runs, benchmarks
+research/        Design notes: one-page fit math, loop convergence findings
 ```
 
-### Environment variables
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `ANTHROPIC_API_KEY` | — | Anthropic provider key |
-| `OPENAI_API_KEY` | — | OpenAI provider key |
-| `RESUME_PROVIDER` | auto-detect | Force `anthropic` or `openai` |
-| `RESUME_MODEL` | provider default | Override the model id |
-| `RUN_BUDGET_SECONDS` | `900` | Wall-clock budget per run. This is what a *complete* run costs. Lower it and the loop stops early — measured, keyword coverage drops from 100% to 82% when the budget allows two refine cycles instead of four. Shorter does not mean faster, it means worse. |
-| `PROVIDER_TIMEOUT_SECONDS` | `180` | Per-request timeout for the model provider |
-| `PROVIDER_MAX_RETRIES` | `3` | SDK-level retries on connection failures |
-| `TAIL_RESERVE_SECONDS` | `80` | Time reserved for the closing fit/repair/audit phases |
-| `PDFLATEX` | auto-detect | Explicit path to a `pdflatex` binary |
-
-### Deploy to Vercel
-
-The repo deploys as-is: [`vercel.json`](vercel.json) rewrites everything to the serverless function [`api/index.py`](api/index.py), bundles `templates/`, `web/`, and `src/`, sets a 300 s function timeout, and pins `RUN_BUDGET_SECONDS` to 250 so a run ships its best draft before that timeout. Set the API key env vars in the Vercel project settings, or let users bring their own key in the UI.
-
-**Be aware of what that costs.** 300 s fits roughly one evaluation pass and no refinement, and refinement is what lands the last keywords. The app says so explicitly in the UI when the budget cannot fit a full loop, rather than presenting a truncated run as a finished one. To get the full loop, run it somewhere without a per-request ceiling — a background worker, a queue, or any host that allows ~15-minute requests.
+---
 
 ## Testing
 
 ```bash
-python3 tests/check_offline.py     # seconds, no API cost: templates compile,
-                                   # prompts format, guards fire
-
+python3 tests/check_offline.py          # no API calls, no cost — run this first
 python3 tests/run_live.py <name> <jd-file> <dump-file> [aggressiveness] [template]
-                                   # full live run; writes .tex/.pdf/.json and a
-                                   # summary line into tests/results/
+python3 tests/judge_noise.py            # measure evaluator score variance
 ```
 
-`tests/results/BENCHMARK.md` accumulates scores across live runs; `tests/judge_noise.py` measures the evaluator's score variance (the source of the ±3-point noise band the loop uses).
+`check_offline.py` compiles every template, renders every prompt, replays measured phase timings against the budget gates, and asserts the craft score discriminates. It also guards the wiring: an AST pass catches functions *and methods* deleted by a refactor, which is how a `NameError` once reached production.
+
+Live results accumulate in [`tests/results/BENCHMARK.md`](tests/results/BENCHMARK.md) — including the regressions, and the three failures that only appeared when the loop was run against OpenAI.
+
+---
 
 ## Research notes
 
-The reasoning behind the architecture is written down in [`research/`](research/) so it isn't lost between sessions:
+- [`research/one-page-fit.md`](research/one-page-fit.md) — why headroom measurement beats ink coverage, and the line arithmetic behind the fit solver
+- [`research/loop-convergence.md`](research/loop-convergence.md) — why the loop used to repeat mistakes, and why the writing-quality judge had to be rebuilt
 
-- [`one-page-fit.md`](research/one-page-fit.md) — how to make a LaTeX resume land on exactly one full page (line arithmetic, fill measurement, the fit probe).
-- [`loop-convergence.md`](research/loop-convergence.md) — why the generate→evaluate→refine loop initially regressed, and the fixes: judge-noise banding, champion drafts, and repairing only measured defects.
+---
+
+## Contributing
+
+Issues and pull requests are welcome.
+
+1. Run `python3 tests/check_offline.py` before opening a PR — it is fast and free.
+2. If you change agent behaviour, include a live run in `tests/results/` showing the effect. Claims about quality in this repo are backed by measurements, and new ones should be too.
+3. Match the surrounding style: comments explain *why*, especially where a decision looks odd but is load-bearing.
+
+---
+
+## License
+
+[MIT](LICENSE) © Udaya Vijay Anand
+
+## Credits
+
+Built by **Udaya Vijay Anand** ([udsy.in](https://udsy.in) · [@udsy19](https://github.com/udsy19)).
+
+Template credits: [Jake Gutierrez](https://github.com/jakegut/resume) and [Sourabh Bajaj](https://github.com/sb2nov/resume) for the layouts bundled here under their original terms.
