@@ -258,3 +258,36 @@ pass 2's draft anyway. This is the exact failure that produced the `PASSES [74, 
 ship-the-worse-draft bug earlier in the session, now caught. Cost: 912s against a
 250s `RUN_BUDGET_SECONDS`, because the budget is checked between phases and a single
 refine+evaluate cycle can overrun it. Worth a mid-phase check before shipping.
+
+## v6 — computed craft lens + whole-run budget gating
+
+| run | provider | final | pages | coverage | passes | time |
+|---|---|---|---|---|---|---|
+| udaya L3 | claude-opus-5 | 77 | ✅ 1 | 82.4% | 2 | 476s |
+
+**Not comparable to v4/v5.** Two things changed at once and both move the number down for
+reasons unrelated to resume quality:
+
+1. `writing_quality` is now computed from enumerated defects instead of asked for as a
+   number. It returned **10/20 then 12/20** as verified defects fell 6 → 5. Across the
+   previous 14 runs it never left 14-17 and returned exactly 15 nine times. The category
+   is roughly 3 points lower because 15 was never a measurement.
+2. The run budget now gates every phase, so the loop stopped after **2 passes** where v5
+   ran 4. `keyword_match` fell 27-28 → 23 and coverage 100% → 82.4%: coverage is what the
+   later refine passes were buying.
+
+So v6 is a more honest score of a less-refined draft. The lens fix is validated; the
+budget fix is working as designed but exposes that **coverage needs ~4 passes, and 4
+passes need roughly 900s** — a 250s or 600s budget buys a worse resume, not a faster one.
+The default budget is a product decision, not a tuning knob: see below.
+
+### What the budget actually buys
+
+| budget | passes | observed coverage |
+|---|---|---|
+| 250s | 1, no refinement | not measured — one pass only |
+| 600s | 2 | 82.4% |
+| ~900s | 4 | 100% |
+
+Vercel's serverless ceiling is 300s, which fits *one* pass. Shipping the full loop needs
+a background worker or a streaming job that survives past a single request.

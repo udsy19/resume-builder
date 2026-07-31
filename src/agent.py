@@ -28,7 +28,7 @@ from .latex import (LINE_COST_PT, bullets_to_expand, bullets_with_widows, craft_
                     line_arithmetic, measure_fit, replace_bullets, skeleton_line_budget)
 from . import repair
 from .providers import ProviderError, make_provider
-from .validator import keyword_in_text, run_checks, spacing_crush_reason
+from .validator import keyword_in_text, run_checks, score_craft, spacing_crush_reason
 
 MODEL = "claude-opus-5"
 MAX_TOKENS = 32000
@@ -37,6 +37,18 @@ PASS_THRESHOLD = 95  # out of 100 — the ResumeWorded/VMock bar, not "good enou
 # Soft deadline: ship the best draft before a serverless timeout kills the run.
 # Override with RUN_BUDGET_SECONDS for long local runs that should keep refining.
 RUN_BUDGET_SECONDS = int(os.environ.get("RUN_BUDGET_SECONDS", "250"))
+# The budget covers the WHOLE run, so the closing phases have to be paid for out of it.
+# Measured on live runs: the one-page fit solver, widow repair and audit together cost
+# ~80s. The loop stops that far short of the deadline so it can still afford them —
+# without this reserve the run overshoots by the entire length of the tail.
+TAIL_RESERVE_SECONDS = int(os.environ.get("TAIL_RESERVE_SECONDS", "80"))
+# Measured cost of one tighten / repair / expand round. These phases are polish: when
+# time is short they are skipped so the evaluation loop, which is not optional, still runs.
+POLISH_ROUND_SECONDS = 20
+# Measured cost of one refine + re-evaluate cycle (~150s refining, ~36s across the three
+# parallel judges). A cycle is only started if it can finish, because a half-finished
+# refinement is worth nothing: the loop ships the champion draft either way.
+REFINE_CYCLE_SECONDS = 190
 SCORE_CAPS = {"keyword_match": 30, "ats_compliance": 20, "writing_quality": 20, "truthfulness": 20, "page_fit": 10}
 
 # Reasoning depth per phase — Opus 5 is strong at low/medium; only writing needs high.
@@ -53,6 +65,32 @@ _THINKING_FLUSH_AT = 90
 
 class AgentError(Exception):
     pass
+
+
+class _Clock:
+    """Wall-clock budget for one run.
+
+    Held on the agent so every phase can consult it, not just the refine loop. Checking
+    it only between refine iterations was not enough: generation plus the polish phases
+    alone cost ~194s of a 250s budget on a measured run, so the loop reached its first
+    deadline check having already spent the budget, and the closing phases then ran
+    unbilled on top.
+    """
+
+    def __init__(self, budget: float):
+        self.start = time.monotonic()
+        self.budget = budget
+
+    def elapsed(self) -> float:
+        return time.monotonic() - self.start
+
+    def left(self) -> float:
+        return self.budget - self.elapsed()
+
+    def expired(self, reserve: float = 0.0) -> bool:
+        """True when less than `reserve` seconds remain — i.e. too late to start work
+        that costs about `reserve` and still finish inside the budget."""
+        return self.left() <= reserve
 
 
 def _text_of(message) -> str:
@@ -172,6 +210,9 @@ class ResumeAgent:
                  provider: Optional[str] = None, model: Optional[str] = None):
         self.provider = make_provider(provider, model, user_api_key)
         self.model_label = f"{self.provider.name}:{self.provider.model}"
+        # Replaced per-run by run(); this default keeps edit() and any direct phase call
+        # (tests, the chat editor) unbudgeted rather than instantly "expired".
+        self._clock = _Clock(float("inf"))
 
     async def _stream_call(self, *, phase: str, system, messages, output_schema: Optional[dict] = None):
         """One streamed model call, provider-agnostic.
@@ -285,6 +326,26 @@ class ResumeAgent:
         for name, res in results.items():
             scores.update(res["scores"])
             issues += res.get("issues") or []
+            # The craft judge enumerates writing defects rather than scoring them; the
+            # number is arithmetic over quotes verified against the document, so a draft
+            # with fewer defects cannot score the same as one with more.
+            obs = res.get("craft_observations")
+            if obs is not None:
+                craft = score_craft(obs, latex)
+                scores["writing_quality"] = {"score": craft["score"], "evidence": craft["evidence"]}
+                yield {"step": "craft_scored", "lens": name,
+                       "message": f"Writing quality {craft['score']}/20 from "
+                                  f"{sum(craft['counts'].values())} verified defect(s)",
+                       "data": {"counts": craft["counts"], "rejected": craft["rejected"]}}
+                # Every verified defect becomes a concrete worklist item, so the refine
+                # pass fixes the exact bullets the score was computed from.
+                for field, entries in obs.items():
+                    for e in entries or []:
+                        issues.append({
+                            "category": "writing_quality",
+                            "fix": f"[{field.replace('_', ' ')}] \"{e.get('quote', '')[:120]}\" — "
+                                   f"{e.get('fix', 'rewrite it')}",
+                        })
 
         missing = [c for c in SCORE_CAPS if c not in scores]
         if missing:
@@ -315,6 +376,10 @@ class ResumeAgent:
         total_fixed = 0
         self._tightened, self._tightened_latex = 0, latex
         for _ in range(rounds):
+            if self._clock.expired(TAIL_RESERVE_SECONDS + POLISH_ROUND_SECONDS):
+                yield {"step": "skipped", "phase": "tighten",
+                       "message": "Skipping further tightening — not enough time left in the run budget."}
+                break
             fit = measure_fit(latex)
             if not fit.ok or fit.headroom_pt is None:
                 break
@@ -367,6 +432,10 @@ class ResumeAgent:
         added = 0
         self._expanded, self._expanded_latex = 0, latex
         for _ in range(rounds):
+            if self._clock.expired(TAIL_RESERVE_SECONDS + POLISH_ROUND_SECONDS):
+                yield {"step": "skipped", "phase": "expand",
+                       "message": "Skipping page fill — not enough time left in the run budget."}
+                break
             fit = measure_fit(latex)
             if not fit.ok or fit.headroom_pt is None or fit.pages != 1:
                 break
@@ -431,6 +500,11 @@ class ResumeAgent:
         defects = craft_defects(latex)[:max_bullets]
         if not defects:
             return
+        if self._clock.expired(TAIL_RESERVE_SECONDS + POLISH_ROUND_SECONDS):
+            yield {"step": "skipped", "phase": "repair",
+                   "message": f"Skipping repair of {len(defects)} writing defect(s) — "
+                              "not enough time left in the run budget."}
+            return
         yield {"step": "repairing", "phase": "repair",
                "message": f"Repairing {len(defects)} measured writing defect(s) — "
                           "bullets with no outcome, or too much bold",
@@ -484,7 +558,8 @@ class ResumeAgent:
     ) -> AsyncGenerator[Dict, None]:
         """Run the full agentic loop, yielding progress events; the last event is step=result."""
         aggressiveness = max(1, min(3, int(aggressiveness)))
-        run_start = time.monotonic()
+        self._clock = _Clock(RUN_BUDGET_SECONDS)
+        clock = self._clock
 
         # ── 1. JD analysis ──
         yield {"step": "analyzing", "phase": "analyze",
@@ -729,14 +804,21 @@ class ResumeAgent:
                 stalls = 0
             if iteration == max_iterations:
                 break
-            out_of_time = time.monotonic() - run_start > RUN_BUDGET_SECONDS
+            # Enough time for another refine AND the re-evaluation that judges it AND the
+            # closing phases — not merely "the deadline has not passed yet". Asking the
+            # weaker question is what let a run spend its whole budget before the first
+            # check and then run the tail on top of it.
+            out_of_time = clock.expired(TAIL_RESERVE_SECONDS + REFINE_CYCLE_SECONDS)
             # Only a satisfied hard constraint earns the right to stop early. While the
             # resume still doesn't fit or doesn't compile, keep working even if the score
             # stalled or dipped — giving up here is what shipped two-page resumes.
             if hard_ok and (not improved or out_of_time):
                 yield {"step": "degraded",
                        "message": "Score stopped improving — shipping the best draft."
-                                  if not improved else "Time budget reached — shipping the best draft."}
+                                  if not improved else
+                                  f"Not enough of the {int(clock.budget)}s budget left for another "
+                                  f"refine-and-re-evaluate cycle ({int(clock.left())}s remaining) — "
+                                  "shipping the best draft."}
                 break
             if out_of_time and not hard_ok:
                 yield {"step": "degraded",
@@ -852,51 +934,58 @@ class ResumeAgent:
         # ── Final editorial audit: the craft layer. Content is frozen; this fixes only
         # consistency, typography and widow lines. Accepted only if the result still fits
         # one page and keeps every keyword — otherwise discarded.
-        yield {"step": "auditing", "phase": "audit",
-               "message": "Final audit: date formats, parallel grammar, bold discipline, widow lines...",
-               "progress": 97}
-        try:
-            audit_prompt = prompts.AUDIT_PROMPT.format(
-                local_checks=checks.summary(),
-                keywords=", ".join(checks.must_have.matched) or "(none recorded)",
-                latex=best["latex"],
-            )
+        if clock.expired():
+            yield {"step": "skipped", "phase": "audit",
+                   "message": f"Skipping the final audit — the {int(clock.budget)}s run budget is spent. "
+                              "The draft below is the champion; run again for the editorial pass.",
+                   "progress": 97}
             audited = None
-            async for ev in self._stream_call(
-                phase="audit", system=prompts.AUDIT_SYSTEM,
-                messages=[{"role": "user", "content": audit_prompt}],
-                output_schema=prompts.AUDIT_SCHEMA,
-            ):
-                if ev["event"] == "message":
-                    audited = _parse_json(_text_of(ev["message"]))
-                else:
-                    yield {"step": "live", **ev}
+        else:
+            yield {"step": "auditing", "phase": "audit",
+                   "message": "Final audit: date formats, parallel grammar, bold discipline, widow lines...",
+                   "progress": 97}
+            try:
+                audit_prompt = prompts.AUDIT_PROMPT.format(
+                    local_checks=checks.summary(),
+                    keywords=", ".join(checks.must_have.matched) or "(none recorded)",
+                    latex=best["latex"],
+                )
+                audited = None
+                async for ev in self._stream_call(
+                    phase="audit", system=prompts.AUDIT_SYSTEM,
+                    messages=[{"role": "user", "content": audit_prompt}],
+                    output_schema=prompts.AUDIT_SCHEMA,
+                ):
+                    if ev["event"] == "message":
+                        audited = _parse_json(_text_of(ev["message"]))
+                    else:
+                        yield {"step": "live", **ev}
 
-            candidate_latex = _extract_latex(audited["latex"])
-            verify = await compile_pdf(candidate_latex)
-            recheck = run_checks(
-                candidate_latex,
-                must_have=[k for k in jd_analysis.get("must_have_keywords", []) if k in supported],
-                nice_to_have=[k for k in jd_analysis.get("nice_to_have_keywords", []) if k in supported],
-                unsupported=absent, compiled=verify,
-            )
-            safe = (
-                verify.ok and verify.pages == 1
-                and recheck.must_have.coverage >= checks.must_have.coverage
-                and not spacing_crush_reason(best["latex"], candidate_latex)
-            )
-            if safe:
-                best["latex"] = candidate_latex
-                evaluation["local_checks"] = recheck.to_dict()
-                yield {"step": "audited",
-                       "message": f"Applied {len(audited['corrections'])} editorial correction(s)",
-                       "data": {"corrections": audited["corrections"]}}
-            else:
-                yield {"step": "audited",
-                       "message": "Audit changes rejected — they would have hurt fit or keyword coverage",
-                       "data": {"corrections": []}}
-        except (ProviderError, AgentError) as e:
-            yield {"step": "audited", "message": f"Audit skipped ({e})", "data": {"corrections": []}}
+                candidate_latex = _extract_latex(audited["latex"])
+                verify = await compile_pdf(candidate_latex)
+                recheck = run_checks(
+                    candidate_latex,
+                    must_have=[k for k in jd_analysis.get("must_have_keywords", []) if k in supported],
+                    nice_to_have=[k for k in jd_analysis.get("nice_to_have_keywords", []) if k in supported],
+                    unsupported=absent, compiled=verify,
+                )
+                safe = (
+                    verify.ok and verify.pages == 1
+                    and recheck.must_have.coverage >= checks.must_have.coverage
+                    and not spacing_crush_reason(best["latex"], candidate_latex)
+                )
+                if safe:
+                    best["latex"] = candidate_latex
+                    evaluation["local_checks"] = recheck.to_dict()
+                    yield {"step": "audited",
+                           "message": f"Applied {len(audited['corrections'])} editorial correction(s)",
+                           "data": {"corrections": audited["corrections"]}}
+                else:
+                    yield {"step": "audited",
+                           "message": "Audit changes rejected — they would have hurt fit or keyword coverage",
+                           "data": {"corrections": []}}
+            except (ProviderError, AgentError) as e:
+                yield {"step": "audited", "message": f"Audit skipped ({e})", "data": {"corrections": []}}
 
         yield {
             "step": "result",

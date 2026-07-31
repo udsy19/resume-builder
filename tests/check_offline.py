@@ -129,6 +129,86 @@ def main():
         assert "HARD FAILURE" in s and "Terraform" in s and "must NOT be penalized" in s
     check("checks surface hard failure + absent list", scoring)
 
+    def budget_gating():
+        """Replay the measured v5-udaya-t3 timeline against the gates.
+
+        Phase costs are the real ones from tests/results/v5-udaya-t3.log. The point is
+        that the run stops inside its budget instead of spending 194s on pre-loop work,
+        never checking, and then running the tail unbilled on top.
+        """
+        from src.agent import (_Clock, TAIL_RESERVE_SECONDS, POLISH_ROUND_SECONDS,
+                               REFINE_CYCLE_SECONDS)
+
+        class FakeClock(_Clock):
+            """Same gates, simulated time — no sleeping in a unit test."""
+            def __init__(self, budget):
+                self.budget, self.now = budget, 0.0
+            def elapsed(self): return self.now
+            def spend(self, secs): self.now += secs
+
+        # measured: analyze+plan 22, generate 116, then polish rounds of ~18 each
+        c = FakeClock(250)
+        c.spend(22 + 116)                                  # 138s: analyze, plan, generate
+        polish_gate = TAIL_RESERVE_SECONDS + POLISH_ROUND_SECONDS
+        ran_polish = 0
+        for cost in (14, 22, 18):                          # tighten, repair, expand
+            if c.expired(polish_gate):
+                break
+            c.spend(cost)
+            ran_polish += 1
+        c.spend(36)                                        # first evaluation (3 judges)
+        # The refine gate must refuse a cycle it cannot finish.
+        assert c.expired(TAIL_RESERVE_SECONDS + REFINE_CYCLE_SECONDS), \
+            "refine gate would start a cycle it cannot pay for"
+        c.spend(6 + 71)                                    # widow repair + audit
+        assert c.elapsed() <= 250 * 1.15, \
+            f"run overshoots budget by more than 15%: {c.elapsed():.0f}s of 250s"
+        # And the polish phases must actually be curtailed, not all run regardless.
+        assert ran_polish < 3, "no polish round was skipped despite a tight budget"
+
+        # A budget with real room must NOT curtail anything.
+        roomy = FakeClock(900)
+        roomy.spend(138)
+        assert not roomy.expired(polish_gate), "roomy budget wrongly skips polish"
+        roomy.spend(14 + 22 + 18 + 36)
+        assert not roomy.expired(TAIL_RESERVE_SECONDS + REFINE_CYCLE_SECONDS), \
+            "roomy budget wrongly refuses to refine"
+    check("run budget gates every phase, not just the loop", budget_gating)
+
+    def craft_discriminates():
+        """The property the old holistic lens lacked: different drafts, different scores."""
+        from src.validator import score_craft, CRAFT_PENALTIES
+        doc = r"""
+        \resumeItem{Built a Python pipeline that cut nightly ETL runtime from 6h to 40m}
+        \resumeItem{Taught weekly labs for 75 students}
+        \resumeItem{Was responsible for maintaining the deployment scripts}
+        \resumeItem{Wrote \textbf{Terraform} and \textbf{Ansible} and \textbf{Helm} charts}
+        """
+        q = lambda s: {"quote": s, "fix": "close on a result"}
+        clean = score_craft({}, doc)["score"]
+        one = score_craft({"dead_tail_bullets": [q("Taught weekly labs for 75 students")]}, doc)["score"]
+        two = score_craft({
+            "dead_tail_bullets": [q("Taught weekly labs for 75 students")],
+            "weak_openings": [q("Was responsible for maintaining the deployment scripts")],
+        }, doc)["score"]
+        assert clean == 20, f"a defect-free draft should score 20, got {clean}"
+        assert clean > one > two, f"score must fall as defects accumulate: {clean}, {one}, {two}"
+
+        # Unverifiable quotes are discarded rather than charged.
+        bogus = score_craft({"dead_tail_bullets": [q("text that appears nowhere in the document")]}, doc)
+        assert bogus["score"] == 20 and bogus["rejected"] == 1, \
+            f"hallucinated defect was charged: {bogus}"
+
+        # Caps hold: one class alone cannot drive the score to zero.
+        flood = score_craft({"overbolded_bullets": [q("Wrote \\textbf{Terraform}")] * 40}, doc)
+        assert flood["score"] >= 20 - CRAFT_PENALTIES["overbolded_bullets"][1], "cap not applied"
+
+        # And the judge is no longer *asked* for the number it used to park on.
+        from src.prompts import judge_schema
+        assert "writing_quality" not in judge_schema(["writing_quality", "page_fit"])["properties"]["scores"]["properties"], \
+            "craft judge is still being asked to score writing_quality directly"
+    check("writing_quality is computed and discriminates", craft_discriminates)
+
     print()
     if failures:
         print(f"{len(failures)} FAILURE(S): {', '.join(failures)}")

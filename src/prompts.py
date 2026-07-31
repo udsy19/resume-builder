@@ -409,7 +409,14 @@ Read every bullet against these, quoting each offender:
 - At most two bolded (\\textbf) spans per bullet, and no bolding inside a role, project, or section title line beyond the template's own structural bold. Three or more bolds is an issue naming the bullet and which spans to unbold.
 - Strong unique action verb to open (no verb repeated anywhere in the document, no banned weak verbs), a real metric or scale signal, STAR-lite structure, varied rhythm, no pronouns, no passive voice.
 - Every bullet is aimed at THIS role. Flag any bullet framed for a different audience (instructional metrics on an engineering resume) and say how to reframe it onto the technical substance.
-Score writing_quality against these anchors: 18-20 when every bullet closes on a real result and bold discipline holds throughout; 13-17 when two or more bullets end on activity, headcounts, tool lists, or empty purpose clauses, or any bullet carries 4+ bolds; below 13 when most bullets are activity-only or action verbs repeat.
+You do NOT score writing_quality. Instead, ENUMERATE its defects in `craft_observations`, putting every offender in the matching list and quoting it verbatim from the resume. The score is computed from your counts, so a missed defect silently inflates the resume's score and an invented one is discarded — quote exactly, and list an offender only once, in the single list that fits it best.
+- `dead_tail_bullets` — ends on activity, a headcount, a tool list, or an empty purpose clause instead of a result. Say what it should close on instead.
+- `weak_openings` — opens on a weak or passive verb.
+- `off_audience_bullets` — written for a different reader than this role. Say how to reframe it.
+- `overbolded_bullets` — three or more \\textbf spans.
+- `repeated_verbs` — an opening verb already used by another bullet.
+- `multi_claim_bullets` — two unrelated claims that should be split.
+An empty list is a real answer: if a defect class genuinely has no offenders, return [] rather than reaching for a marginal example.
 Then judge the page itself from the attached PDF and the measured page count: more than one page is page_fit 0-2 and an automatic revise; a single page under ~90% full, or showing whitespace gaps, stranded headings, overlapping text, or bullets whose last line holds 1-4 words, is 3-7 with each offender named; one well-filled clean page is 8-10.""",
     },
     "truth": {
@@ -439,26 +446,55 @@ Score ONLY your assigned categories: {categories}. Report every issue you find i
 def judge_schema(categories):
     """Structured-output schema for one judge lens."""
     caps = {"keyword_match": 30, "ats_compliance": 20, "writing_quality": 20, "truthfulness": 20, "page_fit": 10}
+    # writing_quality is computed from enumerated defects, not asked for as a number —
+    # see validator.score_craft for why. The judge observes; the arithmetic happens here.
+    scored = [c for c in categories if c != "writing_quality"]
+    props = {
+        "scores": {
+            "type": "object",
+            "properties": {
+                cat: {
+                    "type": "object",
+                    "properties": {
+                        "score": {"type": "integer", "description": f"0 to {caps[cat]}"},
+                        "evidence": {"type": "string", "description": "Quote the exact resume text that justifies the score"},
+                    },
+                    "required": ["score", "evidence"],
+                    "additionalProperties": False,
+                }
+                for cat in scored
+            },
+            "required": scored,
+            "additionalProperties": False,
+        },
+    }
+    if "writing_quality" in categories:
+        offender = {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "quote": {"type": "string",
+                              "description": "The offending text copied VERBATIM from the resume. "
+                                             "A quote that cannot be found in the document is discarded."},
+                    "fix": {"type": "string", "description": "What it should say instead"},
+                },
+                "required": ["quote", "fix"],
+                "additionalProperties": False,
+            },
+        }
+        fields = ["dead_tail_bullets", "weak_openings", "off_audience_bullets",
+                  "overbolded_bullets", "repeated_verbs", "multi_claim_bullets"]
+        props["craft_observations"] = {
+            "type": "object",
+            "properties": {f: dict(offender) for f in fields},
+            "required": fields,
+            "additionalProperties": False,
+        }
     return {
         "type": "object",
         "properties": {
-            "scores": {
-                "type": "object",
-                "properties": {
-                    cat: {
-                        "type": "object",
-                        "properties": {
-                            "score": {"type": "integer", "description": f"0 to {caps[cat]}"},
-                            "evidence": {"type": "string", "description": "Quote the exact resume text that justifies the score"},
-                        },
-                        "required": ["score", "evidence"],
-                        "additionalProperties": False,
-                    }
-                    for cat in categories
-                },
-                "required": list(categories),
-                "additionalProperties": False,
-            },
+            **props,
             "issues": {
                 "type": "array",
                 "items": {
@@ -472,7 +508,7 @@ def judge_schema(categories):
                 },
             },
         },
-        "required": ["scores", "issues"],
+        "required": list(props) + ["issues"],
         "additionalProperties": False,
     }
 

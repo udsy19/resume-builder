@@ -609,3 +609,86 @@ def estimate_pages(latex: str) -> int:
     elif score <= 230:
         return 2
     return 3
+
+
+# ── Craft scoring ────────────────────────────────────────────────────
+#
+# writing_quality used to be a holistic 0-20 asked of the craft judge. Measured across
+# 14 live runs it returned 15/20 in nine of them and never left 14-17, on drafts that
+# differed by template, provider, aggressiveness and job description — while every other
+# category moved freely. The rubric's own bands caused it: "13-17 when two or more
+# bullets end on activity" catches essentially every real draft, so the model answered
+# with the midpoint of the band it had been handed.
+#
+# So the judge no longer scores this category. It *enumerates* defects, quoting each
+# offender, and the score is computed here from those counts. Two drafts with different
+# defect counts cannot receive the same number, which is the property the old lens lacked.
+
+# Per-instance penalty and the most any single defect class may cost. The caps stop one
+# bad class from zeroing the score on its own, and are what keep the scale usable.
+CRAFT_PENALTIES = {
+    # Named for the judge's own schema fields.
+    "dead_tail_bullets":       (2.0, 8.0),   # ends on activity/headcount/tools, not a result
+    "weak_openings":           (1.0, 4.0),   # weak or passive opening verb
+    "off_audience_bullets":    (1.0, 3.0),   # written for a different reader than this role
+    "overbolded_bullets":      (0.75, 3.0),  # 3+ \textbf spans
+    "repeated_verbs":          (0.75, 3.0),  # same opening verb used twice
+    "multi_claim_bullets":     (0.75, 3.0),  # two unrelated claims in one bullet
+}
+CRAFT_MAX = 20.0
+# A quote has to be findable in the document to count. Judges do occasionally paraphrase
+# a bullet rather than quote it, and an unverifiable defect must not cost the draft points.
+_QUOTE_MIN_CHARS = 12
+
+
+def _quote_is_real(quote: str, rendered: str) -> bool:
+    """True when the judge's quoted offender actually appears in the resume."""
+    q = _rendered_text(quote or "").lower()
+    if len(q) < _QUOTE_MIN_CHARS:
+        return False
+    if q in rendered:
+        return True
+    # Tolerate an elided middle ("Built X ... reducing Y") but require both ends to land.
+    head, _, tail = q.partition("...")
+    if tail and len(head.strip()) >= _QUOTE_MIN_CHARS:
+        return head.strip() in rendered and tail.strip() in rendered
+    return False
+
+
+def score_craft(observations: Dict, latex: str) -> Dict:
+    """Compute writing_quality (0-20) from the craft judge's enumerated defects.
+
+    Returns {"score", "evidence", "counts", "rejected"}. `rejected` counts offenders whose
+    quote could not be found in the resume — they are dropped rather than charged.
+    """
+    rendered = _rendered_text(strip_comments(latex)).lower()
+    counts: Dict[str, int] = {}
+    rejected = 0
+    penalty = 0.0
+    worst: List[str] = []
+
+    for field, (per, cap) in CRAFT_PENALTIES.items():
+        entries = observations.get(field) or []
+        verified = []
+        for e in entries:
+            quote = e.get("quote", "") if isinstance(e, dict) else str(e)
+            if _quote_is_real(quote, rendered):
+                verified.append(e)
+            else:
+                rejected += 1
+        counts[field] = len(verified)
+        if verified:
+            charged = min(len(verified) * per, cap)
+            penalty += charged
+            worst.append((charged, f"{len(verified)} {field.replace('_', ' ')}"))
+
+    score = max(0, round(CRAFT_MAX - penalty))
+    worst.sort(reverse=True, key=lambda w: w[0])
+    detail = "; ".join(w[1] for w in worst[:3]) or "no craft defects found"
+    return {
+        "score": int(score),
+        "evidence": f"Computed from verified defects: {detail}."
+                    + (f" ({rejected} unverifiable quote(s) not charged.)" if rejected else ""),
+        "counts": counts,
+        "rejected": rejected,
+    }
