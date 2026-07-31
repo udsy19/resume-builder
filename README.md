@@ -232,8 +232,13 @@ session token, and only requests carrying a valid token may use the server's key
 
 - **The API key is never sent to the browser.** The client proves it knows the PIN; the
   server spends its own key on that token's behalf.
-- The PIN is compared in constant time, and PIN attempts are rate limited to 8 per 15
-  minutes per IP — six digits is only a million guesses.
+- The PIN is compared in constant time, and attempts are rate limited to 8 per 15 minutes
+  per IP — six digits is only a million guesses.
+- Beyond that, each wrong PIN from an address costs more than the last: after four free
+  attempts the lockout escalates 1 min → 5 min → 30 min → 2 hours. A flat rate limit only
+  slows a guessing run down; this stalls it. A correct PIN is refused while locked, and a
+  success clears the record, so a typo costs nothing. Failures are logged (never the PIN)
+  so an attack on a live host is visible in `journalctl`.
 - Users can always bring their own key in Settings instead, gate or no gate.
 - With `ACCESS_PIN` unset the gate disappears entirely, which is what you want locally.
 - Set `SESSION_SECRET` explicitly in production. Without it the signing secret is derived

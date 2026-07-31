@@ -115,15 +115,64 @@ class PinRequest(BaseModel):
     pin: str = Field(max_length=64)
 
 
+# Progressive lockout on top of the flat rate limit.
+#
+# The rate limiter caps attempts per window, but it resets and lets the next window
+# through at the same speed. Against a short PIN on a public domain that is a slow
+# drip rather than a wall: a patient attacker just keeps coming back. Each failure
+# from an address now costs more than the last, so a guessing run stalls out while a
+# person who fat-fingered their PIN twice is barely inconvenienced.
+_LOCKOUT_AFTER = 4                        # free attempts before backoff starts
+_LOCKOUT_STEPS = (60, 300, 1800, 7200)    # seconds, then capped at the last
+_failures: dict = defaultdict(lambda: {"count": 0, "until": 0.0})
+
+
+def _client_ip(request: Request) -> str:
+    fwd = request.headers.get("x-forwarded-for", "")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return request.client.host if request.client else "?"
+
+
+def _lockout_remaining(ip: str) -> int:
+    rec = _failures.get(ip)
+    if not rec:
+        return 0
+    return max(0, int(rec["until"] - time.monotonic()))
+
+
+def _note_failure(ip: str) -> None:
+    rec = _failures[ip]
+    rec["count"] += 1
+    over = rec["count"] - _LOCKOUT_AFTER
+    if over > 0:
+        step = _LOCKOUT_STEPS[min(over - 1, len(_LOCKOUT_STEPS) - 1)]
+        rec["until"] = time.monotonic() + step
+        # Visible in journalctl, so a guessing run against a live host is noticeable
+        # rather than silent. The PIN itself is never logged.
+        print(f"[auth] failed PIN attempt {rec['count']} from {ip}; locked {step}s", flush=True)
+
+
 @app.post("/api/auth")
 async def auth(request: Request, body: PinRequest):
     """Exchange the PIN for a signed session token. The API key never leaves the server."""
     if not ACCESS_PIN:
         return {"unlocked": True, "token": "", "gate": "disabled"}
-    # Constant-time compare so the response cannot be used as an oracle, and the
-    # attempt is rate limited in middleware since six digits is brute-forceable.
+
+    ip = _client_ip(request)
+    wait = _lockout_remaining(ip)
+    if wait:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Too many incorrect PINs. Try again in {wait // 60 + 1} minute(s).",
+        )
+
+    # Constant-time compare so the response cannot be used as an oracle.
     if not hmac.compare_digest(body.pin.strip(), ACCESS_PIN):
+        _note_failure(ip)
         raise HTTPException(status_code=401, detail="That PIN is not right.")
+
+    _failures.pop(ip, None)               # a success clears the record
     return {"unlocked": True, "token": _issue_token(), "gate": "enabled"}
 
 

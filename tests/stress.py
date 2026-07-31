@@ -202,6 +202,50 @@ def main():
             importlib.reload(webapp)
     check("forged session tokens are all rejected", token_cannot_be_forged)
 
+    def lockout_escalates():
+        """Each wrong PIN must cost more than the last, and a success must clear it."""
+        import importlib
+        os.environ["ACCESS_PIN"] = "424242"
+        try:
+            gated = importlib.reload(webapp)
+            gc = TestClient(gated.app)
+            gated._hits.clear(); gated._failures.clear()
+
+            # Free attempts first, then a lockout that grows.
+            codes = []
+            for i in range(gated._LOCKOUT_AFTER + 2):
+                codes.append(gc.post("/api/auth", json={"pin": f"{i:06d}"}).status_code)
+            assert 429 in codes, f"no lockout after {len(codes)} wrong PINs: {codes}"
+
+            ip = next(iter(gated._failures))
+            first = gated._lockout_remaining(ip)
+            assert first > 0, "lockout recorded no wait"
+
+            gated._note_failure(ip)
+            second = gated._lockout_remaining(ip)
+            assert second > first, f"lockout did not escalate: {first} -> {second}"
+
+            # The correct PIN is refused while locked — the lock is not bypassable.
+            assert gc.post("/api/auth", json={"pin": "424242"}).status_code == 429, \
+                "lockout was bypassed by supplying the correct PIN"
+
+            # Once the lock expires, the right PIN works and clears the record.
+            gated._failures[ip]["until"] = 0.0
+            ok = gc.post("/api/auth", json={"pin": "424242"})
+            assert ok.status_code == 200, ok.status_code
+            assert ip not in gated._failures, "a success did not clear the failure record"
+        finally:
+            os.environ.pop("ACCESS_PIN", None)
+            importlib.reload(webapp)
+    check("wrong PINs trigger escalating lockout", lockout_escalates)
+
+    def lockout_never_logs_the_pin():
+        src = (ROOT / "web" / "app.py").read_text()
+        block = src.split("def _note_failure")[1].split("@app.post")[0]
+        assert "ACCESS_PIN" not in block and "body.pin" not in block, \
+            "the failure logger references the PIN — it must never be logged"
+    check("failed-attempt logging never includes the PIN", lockout_never_logs_the_pin)
+
     print()
     if failures:
         print(f"{len(failures)} FAILURE(S): {', '.join(failures)}")
