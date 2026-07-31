@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import Optional
 
 ONLINE_COMPILER = "https://latex.ytotech.com/builds/sync"
+# Opt-in only. Enabling this sends every compiled document to a third party.
+ALLOW_ONLINE_COMPILER = os.environ.get("ALLOW_ONLINE_COMPILER", "").strip().lower() in ("1", "true", "yes")
 
 # TeX installs frequently aren't on a GUI app's PATH. Look where they actually live,
 # so we compile locally (fast, private) instead of silently shipping the resume to a
@@ -230,6 +232,17 @@ async def compile_pdf(latex: str) -> CompileResult:
     local = compile_local(latex)
     if local is not None:
         return local
+    # No local pdflatex. The hosted compiler sends the whole document — a real person's
+    # name, contact details and employment history — to a third party, so it is opt-in
+    # rather than a silent fallback. On a shared deployment that data belongs to the
+    # visitor, not the operator, and quietly forwarding it is not the operator's call.
+    if not ALLOW_ONLINE_COMPILER:
+        return CompileResult(
+            ok=False,
+            error="No local pdflatex, and the hosted compiler is disabled. Install TeX on "
+                  "this host, or set ALLOW_ONLINE_COMPILER=1 to send documents to "
+                  f"{ONLINE_COMPILER} (they leave this server).",
+        )
     return await compile_online(latex)
 
 
