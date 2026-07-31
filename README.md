@@ -42,8 +42,9 @@ The 95 threshold in the code is the loop's *stopping condition*, not a claim abo
 The templates use font packages that a *base* TeX install does not ship — `CormorantGaramond`, `FiraSans`, `roboto`, `sourcesanspro`, `noto-sans`. A full distribution ([MacTeX](https://tug.org/mactex/), [TeX Live](https://tug.org/texlive/), MiKTeX) has them. On a minimal Debian/Ubuntu install:
 
 ```bash
-sudo apt-get install texlive-latex-base texlive-latex-extra \
-                     texlive-fonts-recommended texlive-fonts-extra
+sudo apt-get install texlive-latex-base texlive-latex-recommended \
+                     texlive-latex-extra texlive-fonts-recommended \
+                     texlive-fonts-extra cm-super
 ```
 
 If a template fails to compile, this is almost always why — `tests/check_offline.py` will tell you which one.

@@ -45,7 +45,12 @@ def main():
     for t in BUILTIN_TEMPLATES:
         def one(t=t):
             r = compile_local(t.read())
-            assert r and r.ok and r.pages == 1, f"{t.id} -> ok={r and r.ok} pages={r and r.pages}"
+            # Surface the actual TeX error. "ok=False pages=None" sent a CI failure
+            # through two blind guess-and-push cycles before anyone could see that
+            # the real cause was a missing font package.
+            detail = (r.error or "").strip().replace("\n", " ")[:300] if r else "no result"
+            assert r and r.ok and r.pages == 1, \
+                f"{t.id} -> ok={r and r.ok} pages={r and r.pages}: {detail}"
         check(f"{t.id} compiles to 1 page", one)
     check("headroom probe", lambda: (
         measure_fit(get_template("udaya").read()).headroom_pt is not None
