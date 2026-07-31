@@ -1,0 +1,29 @@
+# Caddy site block for resume-builder. Append to /etc/caddy/Caddyfile.
+#
+# Two settings are load-bearing. flush_interval -1 disables response buffering, without
+# which the Server-Sent Events progress stream arrives all at once at the end and the UI
+# looks frozen for fifteen minutes. The long transport timeouts outlast a full run, so
+# Caddy cannot kill a generation mid-flight.
+#
+# No `encode gzip` here on purpose: compression buffers, which fights SSE.
+resume.udsy.in, resume.46.202.179.28.sslip.io {
+	reverse_proxy 127.0.0.1:8020 {
+		flush_interval -1
+		transport http {
+			read_timeout 1800s
+			write_timeout 1800s
+			dial_timeout 30s
+		}
+	}
+
+	request_body {
+		max_size 8MB
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+	}
+}

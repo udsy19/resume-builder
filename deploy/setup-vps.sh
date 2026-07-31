@@ -22,9 +22,11 @@ apt-get update -qq
 # texlive-fonts-extra and cm-super are not optional: the templates use
 # CormorantGaramond, FiraSans, roboto, sourcesanspro and noto-sans, and the default
 # template needs T1 fontenc. Without these, every compile fails.
+# Deliberately does NOT install a web server. A host that already terminates TLS —
+# this one runs Caddy for other apps — must not have nginx dropped on top of it,
+# fighting for ports 80 and 443 and taking the existing sites down with it.
 apt-get install -y --no-install-recommends \
     python3 python3-venv python3-pip git curl ca-certificates \
-    nginx certbot python3-certbot-nginx \
     texlive-latex-base texlive-latex-recommended texlive-latex-extra \
     texlive-fonts-recommended texlive-fonts-extra cm-super
 
@@ -79,29 +81,32 @@ cp "$APP_DIR/deploy/resume-builder.service" /etc/systemd/system/resume-builder.s
 systemctl daemon-reload
 systemctl enable --quiet resume-builder
 
-log "nginx"
-# TLS first: the HTTPS server block cannot load until the certificate exists.
-if [ ! -d "/etc/letsencrypt/live/$DOMAIN" ]; then
-    rm -f /etc/nginx/sites-enabled/default
-    cat > "/etc/nginx/sites-available/$DOMAIN" <<NGINX
-server {
-    listen 80;
-    server_name $DOMAIN;
-    root /var/www/html;
-}
-NGINX
+log "Reverse proxy"
+if command -v caddy >/dev/null 2>&1; then
+    # Caddy is already terminating TLS for other sites on this host. Append our block
+    # rather than replacing anything, and only once.
+    if ! grep -q "resume-builder" /etc/caddy/Caddyfile 2>/dev/null; then
+        {
+            echo ""
+            echo "# resume-builder (appended by deploy/setup-vps.sh — do not duplicate)"
+            cat "$APP_DIR/deploy/Caddyfile-resume"
+        } >> /etc/caddy/Caddyfile
+        echo "  appended a site block to /etc/caddy/Caddyfile"
+    else
+        echo "  Caddyfile already has a resume-builder block, left untouched"
+    fi
+    caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null \
+        || { echo "Caddyfile did not validate — not reloading." >&2; exit 1; }
+    systemctl reload caddy
+    echo "  Caddy reloaded; it provisions TLS automatically once DNS resolves here"
+elif command -v nginx >/dev/null 2>&1; then
+    cp "$APP_DIR/deploy/nginx-resume.conf" "/etc/nginx/sites-available/$DOMAIN"
     ln -sf "/etc/nginx/sites-available/$DOMAIN" "/etc/nginx/sites-enabled/$DOMAIN"
     nginx -t && systemctl reload nginx
-    certbot certonly --nginx -d "$DOMAIN" --non-interactive --agree-tos \
-        --register-unsafely-without-email || {
-        echo "certbot failed — does $DOMAIN resolve to this host yet?" >&2; exit 1; }
+else
+    echo "  No Caddy or nginx found. Install one and proxy it to 127.0.0.1:8020;"
+    echo "  deploy/Caddyfile-resume and deploy/nginx-resume.conf are ready to use."
 fi
-
-cp "$APP_DIR/deploy/nginx-resume.conf" "/etc/nginx/sites-available/$DOMAIN"
-ln -sf "/etc/nginx/sites-available/$DOMAIN" "/etc/nginx/sites-enabled/$DOMAIN"
-rm -f /etc/nginx/sites-enabled/default
-nginx -t
-systemctl reload nginx
 
 log "Starting"
 systemctl restart resume-builder

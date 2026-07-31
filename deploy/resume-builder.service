@@ -11,10 +11,12 @@ WorkingDirectory=/opt/resume-builder
 
 # Secrets live here, root-owned and 0600. Never in the repo.
 EnvironmentFile=/etc/resume-builder.env
+# Port is configurable because a host often already runs something on 8000.
+Environment=PORT=8020
 
 # A full run is ~15 minutes of model calls; nothing here should cut that short.
 ExecStart=/opt/resume-builder/.venv/bin/uvicorn web.app:app \
-    --host 127.0.0.1 --port 8000 \
+    --host 127.0.0.1 --port ${PORT} \
     --timeout-keep-alive 1200 \
     --workers 1
 
