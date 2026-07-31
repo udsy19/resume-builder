@@ -34,6 +34,14 @@ def main():
 
     client = TestClient(webapp.app)
 
+    # Provider keys in the developer's shell change what these tests observe, so every
+    # test that cares sets them explicitly and clears them afterwards. Start from clean.
+    for _k in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "ACCESS_PIN"):
+        os.environ.pop(_k, None)
+    import importlib as _il
+    webapp = _il.reload(webapp)
+    client = TestClient(webapp.app)
+
     print("routes:")
 
     def health():
@@ -189,6 +197,10 @@ def main():
         the provider. A visitor's own key still routes to that key's own provider."""
         import importlib
         os.environ["ACCESS_PIN"] = "918273"
+        # Pinned explicitly. Read from the ambient shell this passed or failed depending
+        # on whether the developer happened to have a provider key exported.
+        os.environ["ANTHROPIC_API_KEY"] = "sk-ant-test"
+        os.environ["OPENAI_API_KEY"] = "sk-proj-test"
         try:
             gated = importlib.reload(webapp)
             gc = TestClient(gated.app)
@@ -213,7 +225,8 @@ def main():
             except Exception as e:
                 assert getattr(e, "status_code", None) == 401, e
         finally:
-            os.environ.pop("ACCESS_PIN", None)
+            for k in ("ACCESS_PIN", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"):
+                os.environ.pop(k, None)
             importlib.reload(webapp)
     check("PIN-unlocked runs default to the configured provider", pin_selects_provider)
 
