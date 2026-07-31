@@ -5,13 +5,17 @@ Usage: python3 live_test.py <run-name> <jd-file> <dump-file> [aggressiveness] [t
 import asyncio
 import json
 import sys
+import os
 import time
 from pathlib import Path
 
-ROOT = Path("/Users/udsy/PycharmProjects/resume-builder")
+# Derived from this file, not hardcoded: the absolute paths that used to live
+# here pointed at one developer's machine and a scratch directory that does not
+# exist anywhere else, so a fresh clone could not run a live test at all.
+ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-OUT = Path("/private/tmp/claude-501/-Users-udsy-PycharmProjects-resume-builder/744e4e28-53c5-444a-8d8a-4bbc80705c0b/scratchpad/runs")
-OUT.mkdir(exist_ok=True)
+OUT = Path(os.environ.get("RESUME_RUN_OUT") or (ROOT / "tests" / "results"))
+OUT.mkdir(parents=True, exist_ok=True)
 
 from src.agent import ResumeAgent          # noqa: E402
 from src.ingest import Dump, ingest_file    # noqa: E402

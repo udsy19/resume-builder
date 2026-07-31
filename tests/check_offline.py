@@ -296,6 +296,25 @@ def main():
         assert '<<[A-Z_]+>>' in agent_src, "no guard against unfilled placeholders reaching the user"
     check("cover letter compiles to one clean page", cover_letter_template)
 
+    def no_machine_specific_paths():
+        """A committed absolute path to one machine breaks every other checkout.
+
+        tests/run_live.py carried a hardcoded home directory and a scratch path that
+        existed on exactly one computer, so a fresh clone could not run a live test.
+        """
+        import re as _re
+        bad = []
+        for f in list(ROOT.glob("*.py")) + list(ROOT.glob("*/*.py")) + list(ROOT.glob("*/*.sh")):
+            if ".venv" in str(f):
+                continue
+            for n, line in enumerate(f.read_text().splitlines(), 1):
+                if line.lstrip().startswith("#"):
+                    continue
+                if _re.search(r"[\"']/(Users|home)/[a-zA-Z]", line) or "/private/tmp/claude" in line:
+                    bad.append(f"{f.relative_to(ROOT)}:{n}")
+        assert not bad, f"machine-specific absolute path(s): {bad[:4]}"
+    check("no machine-specific absolute paths", no_machine_specific_paths)
+
     print()
     if failures:
         print(f"{len(failures)} FAILURE(S): {', '.join(failures)}")
