@@ -545,6 +545,8 @@ function renderDone(desk, s) {
     <div class="display-line">${esc(r.jd_analysis.role_title || s.name)}<em>${r.jd_analysis.company ? " @ " + esc(r.jd_analysis.company) : ""}</em></div>
 
     ${s.reducedLoop ? `<div class="notice">${esc(s.reducedLoop)}</div>` : ""}
+    ${s.coverLetter && !coverLetter(s) ? `<div class="notice">Cover letter: ${
+      esc(s.letterFailed || "it could not be produced for this run.")} The resume below is unaffected.</div>` : ""}
 
     <div class="result-grid">
       <div class="score-block">
@@ -1003,9 +1005,13 @@ function handleRunUpdate(s, u) {
       pushLog(s, u.message);
       break;
     case "letter_done":
+      s.letterFailed = null;
       pushLog(s, u.message, "good");
       break;
     case "letter_failed":
+      // Kept on the session: a letter that was asked for and never appeared must be
+      // explained on the result plate, not only in a log line already scrolled past.
+      s.letterFailed = u.message;
       pushLog(s, u.message, "error");
       break;
     case "evaluated": {
