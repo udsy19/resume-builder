@@ -61,6 +61,28 @@ def _rate_limit(bucket: str, request: Request):
     q.append(now)
 
 
+# Which bucket guards which path, for the middleware below.
+_RATE_LIMITED_PATHS = {"/api/tailor/stream": "tailor", "/api/edit/stream": "edit"}
+
+
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    """Apply the rate limit before routing, not inside the handler.
+
+    Endpoints taking a Pydantic body are validated before their handler runs, so a
+    malformed request returned 422 without ever reaching the in-handler limiter —
+    leaving invalid requests effectively unlimited. Checking here covers both the
+    valid and invalid paths with one rule.
+    """
+    bucket = _RATE_LIMITED_PATHS.get(request.url.path)
+    if bucket and request.method == "POST":
+        try:
+            _rate_limit(bucket, request)
+        except HTTPException as e:
+            return JSONResponse(status_code=e.status_code, content={"detail": e.detail})
+    return await call_next(request)
+
+
 @app.exception_handler(RequestValidationError)
 async def validation_handler(request: Request, exc: RequestValidationError):
     # Strip submitted values from validation errors (they can contain API keys).
@@ -149,7 +171,7 @@ async def tailor_stream(
     api_key: str = Form(""),
 ):
     """Run the agentic tailoring loop, streaming progress as SSE."""
-    _rate_limit("tailor", request)
+    # Rate limiting happens in middleware, before routing — see rate_limit_middleware.
 
     job_description = job_description.strip()
     if not job_description:
@@ -214,7 +236,6 @@ async def tailor_stream(
 @app.post("/api/edit/stream")
 async def edit_stream(request: Request, edit: EditRequest):
     """Conversational resume editing — streams thinking, then the updated document."""
-    _rate_limit("edit", request)
     if not edit.latex.strip() or "\\documentclass" not in edit.latex:
         raise HTTPException(status_code=400, detail="No valid resume to edit.")
     if not edit.instruction.strip():
