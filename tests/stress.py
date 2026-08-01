@@ -371,6 +371,38 @@ def main():
         webapp._runs.clear()
     check("runs survive a dropped client and stay bounded", runs_survive_a_dropped_client)
 
+    def cancel_actually_stops_a_run():
+        """Cancel must reach the server, because disconnecting no longer stops a run.
+
+        Runs outlive their clients so a reload can rejoin them. That makes "the browser
+        went away" and "stop spending my tokens" different signals, and only the second
+        may end the run.
+        """
+        rid = webapp._new_run()
+        assert webapp._runs[rid]["cancelled"] is False
+
+        r = client.post(f"/api/runs/{rid}/cancel")
+        assert r.status_code == 200 and r.json()["cancelled"] is True, r.text
+        assert webapp._runs[rid]["cancelled"] is True, "cancel did not set the flag"
+        # The cancellation is recorded, so a client rejoining learns the run ended.
+        assert any(e.get("step") == "cancelled" for e in webapp._runs[rid]["events"]), \
+            "cancellation was not recorded for rejoining clients"
+
+        # Cancelling something unknown is a clean answer, not a 500.
+        r = client.post("/api/runs/not-a-run/cancel")
+        assert r.status_code == 200 and r.json()["cancelled"] is False, r.text
+        webapp._runs.clear()
+
+        # And the client must store one shape in state.runs — the mismatch between
+        # { controller } and a bare controller broke both cancel and delete.
+        app_js = (ROOT / "web" / "static" / "app.js").read_text()
+        sets = [ln.strip() for ln in app_js.splitlines() if "state.runs.set(" in ln]
+        assert sets and all("{ controller" in s for s in sets), \
+            f"state.runs holds inconsistent shapes: {sets}"
+        assert "run?.controller?.abort?.()" in app_js, \
+            "stopRun can still throw and take deleteSession down with it"
+    check("cancel stops the run server-side and cannot break delete", cancel_actually_stops_a_run)
+
     print()
     if failures:
         print(f"{len(failures)} FAILURE(S): {', '.join(failures)}")

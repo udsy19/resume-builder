@@ -435,7 +435,8 @@ def _new_run() -> str:
     while len(_runs) >= MAX_RUNS:
         oldest = min(_runs, key=lambda r: _runs[r]["started"])
         _runs.pop(oldest, None)
-    _runs[run_id] = {"events": [], "done": False, "started": now, "waiters": []}
+    _runs[run_id] = {"events": [], "done": False, "cancelled": False,
+                     "started": now, "waiters": []}
     return run_id
 
 
@@ -449,6 +450,22 @@ def _record(run_id: str, payload: dict) -> None:
     for w in rec["waiters"]:
         w.set()
     rec["waiters"].clear()
+
+
+@app.post("/api/runs/{run_id}/cancel")
+async def run_cancel(run_id: str):
+    """Stop a run that is still burning tokens.
+
+    Necessary because disconnecting no longer stops it: a run has to outlive its client
+    to be resumable, so "the browser went away" and "the user wants this to stop" had to
+    become different signals. Closing the tab keeps it going; this ends it.
+    """
+    rec = _runs.get(run_id)
+    if rec is None:
+        return {"cancelled": False, "reason": "unknown or expired run"}
+    rec["cancelled"] = True
+    _record(run_id, {"step": "cancelled", "message": "Run cancelled — no further tokens spent."})
+    return {"cancelled": True}
 
 
 @app.get("/api/runs/{run_id}/stream")
@@ -552,8 +569,10 @@ async def tailor_stream(
                 template_latex=template_latex,
                 aggressiveness=aggressiveness,
             ):
-                if await request.is_disconnected():
-                    return  # stop burning tokens for a closed tab
+                # Deliberately NOT is_disconnected(): the run must outlive its client
+                # for a reload to be able to rejoin it. Only an explicit cancel stops it.
+                if _runs.get(run_id, {}).get("cancelled"):
+                    return
                 _record(run_id, update)
                 if update.get("step") == "result" and cover_letter:
                     # Held back so the letter can be attached to it: the UI treats the
@@ -573,7 +592,7 @@ async def tailor_stream(
                     template_latex=(TEMPLATES_DIR / "cover-letter.tex").read_text(),
                     today=date.today().strftime("%B %-d, %Y"),
                 ):
-                    if await request.is_disconnected():
+                    if _runs.get(run_id, {}).get("cancelled"):
                         return
                     letter = ev.pop("letter", None) or letter
                     _record(run_id, ev)

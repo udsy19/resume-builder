@@ -878,7 +878,7 @@ async function startRun(s) {
   save(true); renderAll();
 
   const controller = new AbortController();
-  state.runs.set(s.id, { controller });
+  state.runs.set(s.id, { controller, runId: s.runId });
 
   try {
     const res = await fetch("/api/tailor/stream", {
@@ -905,7 +905,20 @@ async function startRun(s) {
 
 function stopRun(id) {
   const run = state.runs.get(id);
-  if (run) { run.controller.abort(); state.runs.delete(id); }
+  const s = state.sessions.find((x) => x.id === id);
+  const runId = (run && run.runId) || (s && s.runId);
+
+  // Tell the server first: since a run now outlives its client, aborting the fetch
+  // only detaches from it — it would keep spending tokens with nobody watching.
+  if (runId) {
+    fetch(`/api/runs/${encodeURIComponent(runId)}/cancel`,
+      { method: "POST", headers: accessHeaders() }).catch(() => {});
+  }
+  // Defensive: this used to assume one shape and threw on the other, which took
+  // the delete button down with it.
+  try { run?.controller?.abort?.(); } catch { /* already gone */ }
+  state.runs.delete(id);
+  if (s) s.runId = null;                      // nothing left to rejoin
 }
 
 function handleRunUpdate(s, u) {
@@ -987,6 +1000,11 @@ function handleRunUpdate(s, u) {
       s.runId = u.run_id;
       s.eventsSeen = 0;
       save(true);
+      break;
+    case "cancelled":
+      s.status = "interrupted";
+      s.runId = null;
+      pushLog(s, u.message, "error");
       break;
     case "reduced_loop":
       // Flagged up front, and kept on the session so the result plate can repeat it —
@@ -1428,7 +1446,7 @@ async function initGate() {
 async function rejoinRun(s) {
   if (!s.runId) return false;
   const controller = new AbortController();
-  state.runs.set(s.id, controller);
+  state.runs.set(s.id, { controller, runId: s.runId });
   try {
     const res = await fetch(`/api/runs/${encodeURIComponent(s.runId)}/stream?offset=${s.eventsSeen || 0}`,
       { headers: accessHeaders(), signal: controller.signal });
