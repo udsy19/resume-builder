@@ -2,16 +2,33 @@
 
 # Resume Builder
 
-**ATS-optimized, one-page LaTeX resumes — written, judged, and rewritten by an agent loop.**
+### ATS-optimized, one-page LaTeX resumes — written, judged, and rewritten by an agent loop
 
-One dump of everything about you, plus a job description. Out comes a tailored, truthful resume that fits on exactly one page — because the page fit is *measured* by compiling the PDF, never guessed.
+One dump of everything about you, plus a job description.<br>
+Out comes a tailored, truthful resume that fits on exactly one page — because the fit is **measured** by compiling the PDF, never guessed.
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
-[![Providers](https://img.shields.io/badge/providers-Anthropic%20%7C%20OpenAI-8A3FFC.svg)](#model-providers)
-[![Deploy: Vercel](https://img.shields.io/badge/deploy-Vercel-black.svg)](#deployment)
+<br>
 
-[Quickstart](#quickstart) · [How it works](#how-it-works) · [Configuration](#configuration) · [API](#api) · [Contributing](#contributing)
+[![License: MIT](https://img.shields.io/badge/License-MIT-1e2edc?style=flat-square)](LICENSE)
+[![Python](https://img.shields.io/badge/Python-3.11+-1e2edc?style=flat-square&logo=python&logoColor=white)](https://www.python.org/downloads/)
+[![Anthropic](https://img.shields.io/badge/Claude-Opus%205-d97757?style=flat-square)](#-model-providers)
+[![OpenAI](https://img.shields.io/badge/OpenAI-GPT--5.6-412991?style=flat-square&logo=openai&logoColor=white)](#-model-providers)
+[![Checks](https://github.com/udsy19/resume-builder/actions/workflows/checks.yml/badge.svg)](https://github.com/udsy19/resume-builder/actions/workflows/checks.yml)
+
+**[Quickstart](#-quickstart)** · **[How it works](#-how-it-works)** · **[Configuration](#-configuration)** · **[Deployment](#-deployment)** · **[API](#-api)** · **[Contributing](#-contributing)**
+
+<br>
+
+<table>
+<tr>
+<td align="center" width="25%"><b>1</b><br><sub>page, guaranteed</sub></td>
+<td align="center" width="25%"><b>100%</b><br><sub>must-have keywords</sub></td>
+<td align="center" width="25%"><b>77–89</b><br><sub>/100 measured</sub></td>
+<td align="center" width="25%"><b>4</b><br><sub>LaTeX templates</sub></td>
+</tr>
+</table>
+
+<sub>Every number here comes from <a href="tests/results/BENCHMARK.md">logged runs</a>, including the ones that regressed.</sub>
 
 </div>
 
@@ -19,23 +36,40 @@ One dump of everything about you, plus a job description. Out comes a tailored, 
 
 ## What this is
 
-This is not a template filler. It is an agent loop that writes a resume, judges it against a recruiter-grade rubric, and keeps refining until the score stops improving or the time budget runs out.
+Not a template filler. An agent loop that writes a resume, judges it against a recruiter-grade rubric, and keeps refining until the score stops improving or the time budget runs out.
 
-Three things make it different from asking a chatbot for a resume:
-
-- **One page is a guarantee, not a hope.** The LaTeX is compiled and TeX's own page arithmetic is read back. If the draft overflows, bullets are shortened by exact character targets until it fits.
-- **Facts come only from your dump.** A dedicated fact-checking judge audits every draft against what you actually wrote. The writer may reframe and re-language; it may not invent.
-- **Repairs act on measured defects.** Across live runs, critique backed by a deterministic check reliably improved the draft while model-judged opinion was roughly a coin flip. So the repair passes only fix things a checker found.
+| | |
+|---|---|
+| 📐 **One page is a guarantee** | The LaTeX is compiled and TeX's own page arithmetic is read back. Overflow is fixed by shortening bullets to exact character targets — never by shrinking margins or fonts. |
+| 🔒 **Facts come only from your dossier** | A dedicated fact-checking judge audits every draft against what you actually wrote. The writer may reframe and re-language; it may not invent. |
+| 📏 **Repairs act on measured defects** | Critique backed by a deterministic check reliably improved drafts; model-argued opinion was roughly a coin flip. So repair passes only fix what a checker found. |
 
 ### What it actually scores
 
-> Finished resumes land in the **77-89 / 100** band, on exactly one page, with **100%** of the must-have keywords your background can honestly support — given a full time budget.
+> [!IMPORTANT]
+> Finished resumes land in the **77–89 / 100** band, on exactly one page, with **100%** of the
+> must-have keywords your background can honestly support — given a full time budget.
+>
+> The 95 in the code is the loop's *stopping condition*, not a claim about typical output.
 
-The 95 threshold in the code is the loop's *stopping condition*, not a claim about typical output. [`tests/results/BENCHMARK.md`](tests/results/BENCHMARK.md) records every measured run, including the ones that regressed and the bugs they exposed.
+<details>
+<summary><b>Why this README quotes its own failures</b></summary>
+
+<br>
+
+[`tests/results/BENCHMARK.md`](tests/results/BENCHMARK.md) logs every measured run, including
+the regressions and the bugs they exposed — a judge that returned the same score for fourteen
+different drafts, a repair pass that cost five points of truthfulness, and an A/B that killed a
+feature this project had already built.
+
+Numbers here are reproducible from committed logs rather than asserted. Where something is
+unproven, it says so.
+
+</details>
 
 ---
 
-## Quickstart
+## 🚀 Quickstart
 
 **Prerequisites:** Python 3.11+, a TeX distribution with `pdflatex` on your `PATH`, and an API key from Anthropic or OpenAI.
 
@@ -71,41 +105,41 @@ python3 tests/check_offline.py
 
 ---
 
-## How it works
+## ⚙️ How it works
 
 Each run is a generate → evaluate → refine loop wrapped in deterministic polish phases.
 
+```mermaid
+flowchart TD
+    A["📄 Dossier + job description<br/>+ template + aggressiveness"] --> B
+
+    B["<b>1 · Analyze</b><br/><sub>role framing and ATS keywords, extracted as<br/>atomic placeable terms, not narrative phrases</sub>"] --> C
+    C["<b>2 · Feasibility plan</b><br/><sub>what your dossier can honestly support —<br/>scoring only counts these</sub>"] --> D
+    D["<b>3 · Generate</b><br/><sub>tailored LaTeX, written to a line budget<br/>measured from the template skeleton</sub>"] --> E
+
+    E["<b>4 · Deterministic polish</b><br/><sub>tighten overlong bullets to exact character<br/>targets, then fill the page</sub>"] --> F
+
+    F["<b>5 · Evaluate</b><br/><sub>local checks feed ground truth into three<br/>parallel judges</sub>"] --> G{"Improving?"}
+
+    G -->|yes| H["<b>6 · Refine</b><br/><sub>restated spec + short worklist,<br/>returned as patches</sub>"]
+    H --> F
+    G -->|"plateau, pass,<br/>or out of budget"| I
+
+    I["<b>7 · One-page solver</b><br/><sub>compile, measure, cut lowest-value<br/>content by exact arithmetic</sub>"] --> J
+    J["<b>8 · Audit</b><br/><sub>typography and consistency —<br/>skipped when checkers find nothing</sub>"] --> K
+
+    K(["✅ Champion draft<br/><sub>best-scoring, always kept</sub>"])
+
+    style A fill:#efedea,stroke:#0a0a0a,stroke-width:2px,color:#0a0a0a
+    style K fill:#1e2edc,stroke:#1e2edc,color:#ffffff
+    style G fill:#e0492a,stroke:#e0492a,color:#ffffff
+    style E fill:#7fb2e8,stroke:#1e2edc,color:#0a0a0a
+    style I fill:#7fb2e8,stroke:#1e2edc,color:#0a0a0a
 ```
- dump + job description + template + aggressiveness
-        │
-        ▼
- 1. Analyze the JD ──── role framing and an ATS keyword plan, extracted as
-        │               atomic placeable terms rather than narrative phrases
-        ▼
- 2. Feasibility plan ── which requirements your dump can honestly support,
-        │               and which are genuinely outside your background.
-        │               Scoring only counts the supported ones.
-        ▼
- 3. Generate ────────── tailored LaTeX written into the chosen template,
-        │               against a line budget measured from the skeleton
-        ▼
- 4. Polish ──────────── deterministic passes: tighten overlong bullets to
-        │               exact targets, repair measured craft defects, then
-        │               expand to fill the page and land missing keywords
-        ▼
- 5. Evaluate ────────── local checks feed ground-truth counts into three
-        │               parallel judges — ATS, recruiter craft, fact-checker
-        ▼
- 6. Refine ──────────── the worklist goes back to the writer as a restated
-        │               spec, not a growing chat history. Repeat until pass,
-        │               plateau, or the wall-clock budget is spent.
-        ▼
- 7. One-page fit ────── compile, measure, and cut the lowest-value content
-        │               by exact arithmetic until the page is one page
-        ▼
- 8. Final audit ─────── typography and consistency, then ship the champion
-                        draft — the best-scoring one, always kept
-```
+
+> [!NOTE]
+> Steps 4 and 7 involve **no model judgement at all**. Page fit is arithmetic over a
+> compiled PDF, which is why one page is a guarantee rather than a hope.
 
 ### Design decisions, each backed by measurement
 
@@ -123,7 +157,7 @@ Full write-ups in [`research/`](research/).
 
 ---
 
-## Cover letters
+## ✉️ Cover letters
 
 Tick the box on the setup screen and the run writes a matching cover letter after the
 resume is final, so it reinforces the same framing instead of restating bullets.
@@ -137,7 +171,7 @@ attached.
 
 ---
 
-## Truthfulness
+## 🔒 Truthfulness
 
 Your dump is the **sole source of facts.**
 
@@ -147,7 +181,7 @@ A dedicated fact-checker judge audits every draft against the dump. Both the job
 
 ---
 
-## Aggressiveness levels
+## 🎚️ Aggressiveness levels
 
 | Level | Name | What it does |
 |:---:|---|---|
@@ -157,7 +191,7 @@ A dedicated fact-checker judge audits every draft against the dump. Both the job
 
 ---
 
-## Templates
+## 🎨 Templates
 
 Four built-in LaTeX templates in [`templates/`](templates/), each with a compiled PDF preview served by the API.
 
@@ -174,7 +208,7 @@ You can also upload a **custom LaTeX template.** It is validated and sandboxed (
 
 ---
 
-## Model providers
+## 🧠 Model providers
 
 [`src/providers.py`](src/providers.py) normalizes Anthropic and OpenAI behind one streaming interface — PDF inputs, JSON-schema outputs, reasoning-effort control — so the agent itself is provider-agnostic.
 
@@ -190,7 +224,7 @@ Provider selection uses `RESUME_PROVIDER`, or is auto-detected from whichever ke
 
 ---
 
-## Configuration
+## 🔧 Configuration
 
 | Variable | Default | Purpose |
 |---|:---:|---|
@@ -251,7 +285,7 @@ session token, and only requests carrying a valid token may use the server's key
 
 ---
 
-## Deployment
+## 🌐 Deployment
 
 ### A VPS or container host (recommended)
 
@@ -289,7 +323,12 @@ Set your API key in the Vercel project's environment variables, or let users sup
 
 ---
 
-## API
+## 🔌 API
+
+<details>
+<summary><b>Endpoints and the streaming contract</b></summary>
+
+<br>
 
 | Method | Route | Purpose |
 |---|---|---|
@@ -310,7 +349,14 @@ The app enforces input caps (4 MB dump, 50 K-character JD) and per-IP rate limit
 
 ---
 
-## Repository layout
+</details>
+
+## 📁 Repository layout
+
+<details>
+<summary><b>Where everything lives</b></summary>
+
+<br>
 
 ```
 src/
@@ -336,7 +382,9 @@ research/        Design notes: one-page fit math, loop convergence findings
 
 ---
 
-## Testing
+</details>
+
+## 🧪 Testing
 
 ```bash
 python3 tests/check_offline.py          # no API calls, no cost — run this first
@@ -350,14 +398,14 @@ Live results accumulate in [`tests/results/BENCHMARK.md`](tests/results/BENCHMAR
 
 ---
 
-## Research notes
+## 📊 Research notes
 
 - [`research/one-page-fit.md`](research/one-page-fit.md) — why headroom measurement beats ink coverage, and the line arithmetic behind the fit solver
 - [`research/loop-convergence.md`](research/loop-convergence.md) — why the loop used to repeat mistakes, and why the writing-quality judge had to be rebuilt
 
 ---
 
-## Contributing
+## 🤝 Contributing
 
 Issues and pull requests are welcome.
 
