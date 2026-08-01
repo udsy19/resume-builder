@@ -69,6 +69,9 @@ LENS_TIMEOUT_SECONDS = int(os.environ.get("LENS_TIMEOUT_SECONDS", "150"))
 # meant to use its one page; leftover space is wasted, and it is the second
 # largest scoring loss after writing quality.
 FILL_TARGET_LINES = float(os.environ.get("FILL_TARGET_LINES", "1.0"))
+# Deterministic writing repair. Kept switchable because whether it earns its place is
+# an empirical question, and the only way to answer it is to run both ways.
+WRITING_REPAIR = os.environ.get("WRITING_REPAIR", "1").strip().lower() not in ("0", "false", "no")
 SCORE_CAPS = {"keyword_match": 30, "ats_compliance": 20, "writing_quality": 20, "truthfulness": 20, "page_fit": 10}
 
 # Reasoning depth per phase — Opus 5 is strong at low/medium; only writing needs high.
@@ -965,7 +968,7 @@ class ResumeAgent:
             # thirty bullet rewrites, which cost truthfulness five points on a measured
             # run and burned enough time to lose a refine cycle. The first pass fixes
             # the bulk; the judges still catch what is left through the worklist.
-            if self._last_craft_obs and not self._wrepair_done:
+            if WRITING_REPAIR and self._last_craft_obs and not self._wrepair_done:
                 self._wrepair_done = True
                 async for ev in self._repair_writing(latex, dump, self._last_craft_obs):
                     yield ev
