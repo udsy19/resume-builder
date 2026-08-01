@@ -69,9 +69,19 @@ LENS_TIMEOUT_SECONDS = int(os.environ.get("LENS_TIMEOUT_SECONDS", "150"))
 # meant to use its one page; leftover space is wasted, and it is the second
 # largest scoring loss after writing quality.
 FILL_TARGET_LINES = float(os.environ.get("FILL_TARGET_LINES", "1.0"))
-# Deterministic writing repair. Kept switchable because whether it earns its place is
-# an empirical question, and the only way to answer it is to run both ways.
-WRITING_REPAIR = os.environ.get("WRITING_REPAIR", "1").strip().lower() not in ("0", "false", "no")
+# Deterministic writing repair, OFF by default.
+#
+# It was built to close the largest gap on the scorecard, and a paired A/B over three
+# batches did not support it: per-pair totals came out +8, +2, -7, a mean of +1.0 that
+# sits inside the measured +/-3 judge-noise band, and no metric moved the same way in
+# every pair. The run that lost 7 points also lost 12.5 points of keyword coverage.
+# Unbounded, an earlier version cost 5 points of truthfulness.
+#
+# So: a model call and a truthfulness risk buying no demonstrated benefit. The code and
+# the switch stay, because three pairs is a small sample and this is "not shown to help"
+# rather than "shown not to help" — set WRITING_REPAIR=1 to run it, and add pairs before
+# concluding either way.
+WRITING_REPAIR = os.environ.get("WRITING_REPAIR", "0").strip().lower() not in ("0", "false", "no")
 SCORE_CAPS = {"keyword_match": 30, "ats_compliance": 20, "writing_quality": 20, "truthfulness": 20, "page_fit": 10}
 
 # Reasoning depth per phase — Opus 5 is strong at low/medium; only writing needs high.

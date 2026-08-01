@@ -456,3 +456,39 @@ runs survive a closed tab, cost is visible, and the audit is skipped when it has
 do. Those are worth having whatever the rubric says.
 
 Establishing whether writing repair helps needs repeated runs per configuration, not one.
+
+## Paired A/B: does deterministic writing repair earn its place?
+
+Three batches. Each batch ran both arms **concurrently** so host contention hit them
+equally, and the arms differ in exactly one variable (`WRITING_REPAIR`). Same fixture,
+provider, aggressiveness and budget throughout.
+
+| pair | total ON | total OFF | diff | writing_quality | truthfulness | coverage |
+|---|---|---|---|---|---|---|
+| 1 | 84 | 76 | **+8** | +2 | +3 | 0 |
+| 2 | 77 | 75 | **+2** | +1 | +1 | 0 |
+| 3 | 69 | 76 | **−7** | 0 | 0 | **−12.5pp** |
+| mean | 76.7 | 75.7 | **+1.0** | +1.0 | +1.3 | −4.2 |
+
+**Verdict: not supported.** The mean total difference of +1.0 sits inside the measured
+±3 judge-noise band, per-pair results swing from +8 to −7, and **no metric moved the same
+way in all three pairs** — the criterion set before the data came in. The 84 in pair 1 is
+the highest score any run has produced, and on its own it would have been an easy thing to
+mistake for a result.
+
+What can be said, weakly: writing_quality and truthfulness were never *worse* with repair
+on (+2/+1/0 and +3/+1/0). That is suggestive and nothing more, given each has a tie.
+
+**Default changed to off.** The pass costs a model call and, unbounded, previously cost 5
+points of truthfulness — paying that for no demonstrated benefit is not justified. The
+code and the `WRITING_REPAIR` switch remain: three pairs is a small sample, so this is
+"not shown to help", not "shown not to help". Add pairs before concluding either way.
+
+Logs for all six runs are in `tests/results/ab/`, and `tests/ab_analyze.py` reproduces
+the table.
+
+### Method note
+
+Pairing mattered. Between-batch variation is large here — the OFF arm alone scored 76, 75,
+76 while the ON arm scored 84, 77, 69 — so unpaired means at n=3 would have been dominated
+by which batch a run happened to land in.

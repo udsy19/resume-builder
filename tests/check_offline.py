@@ -326,7 +326,12 @@ def main():
         from src import repair
         src = (ROOT / "src" / "agent.py").read_text()
 
-        # Bounded to one pass per run.
+        # Off by default: a paired A/B did not show it helping, so it must not run
+        # unless someone opts in.
+        from src.agent import WRITING_REPAIR
+        assert WRITING_REPAIR is False, "writing repair is enabled despite no measured benefit"
+
+        # Bounded to one pass per run when it IS enabled.
         assert "_wrepair_done" in src, "writing repair has no once-per-run guard"
         loop = src.split("Once per run, not once per cycle")[1][:400]
         assert "not self._wrepair_done" in loop, "the guard is not applied at the call site"
